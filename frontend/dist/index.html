@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <title>Add-On Compiler</title>
+    
+    
+    <style>
+        #container {
+            margin-left: 15vw;
+            width: 70vw;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .optionSlot {
+            margin-left: 2.5vw;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #optionContainer {
+            display: flex;
+            justify-content: left;
+            align-items: center;
+            width: 100vw;
+            padding: 20px;
+        }
+        #textCell {
+            padding-left: 35px;
+        }
+        th, td {
+            padding: 10px;
+        }
+        tr {
+            height: 10vh;
+            transition: 0.25s;
+        }
+        #table {
+            margin: 20px;
+        }
+        .projectImage {
+            width: 3.5vw;
+            height: 3.5vw;
+        }
+        img {
+            image-rendering: pixelated;
+        }
+        #expand {
+            cursor: pointer;
+            font-weight: bolder;
+            transition: 0.25s;
+            margin: 0.5vw;
+            font-size: 2.75vw;
+            transition: 0.25s;
+        }
+        #expand:hover {
+            font-size: 3vw;
+            color: #80a2ff;
+        }
+        #buttonCell1 {
+            right: 0;
+            width: 13.5vw;
+        }
+        #buttonCell2 {
+            right: 0;
+            width: 7.5vw;
+        }
+        h1:hover > span {
+            font-size: 2.5vw !important;
+        }
+        .actionButton {
+            background-color: #393939; 
+            border-radius: 5px; 
+            padding: 15px; 
+            font-weight: bolder; 
+            font-size: 1.4vw;
+        }
+        #contextMenu {
+            color: white;
+            right: 0;
+            top: 0;
+            z-index: 999;
+            opacity: 0;
+            position: fixed;
+            transition: opacity 0.1s;
+            background-color: #1f1f1f;
+            padding: 12px;
+            border-radius: 8px;
+            width: 400px;
+        }
+        strong {
+            color: #00C3FF;
+        }
+    </style>
+  <script type="module" crossorigin src="/assets/index.496e04d9.js"></script>
+  <link rel="stylesheet" href="/assets/index.361aeadd.css">
+</head>
+<body>
+    <div id="contextMenu">Hover above buttons or selection <br> to get more info <br><br> Click to hide this pannel</div>
+    <header>
+        <div id="optionContainer">
+            <div class="optionSlot">
+                <button class="actionButton" id="modeButton" data-mode="development">Dev Mode</button>
+            </div>
+            <div class="optionSlot">
+                <h4>Export format:</h4>
+                <select id="saveFormat">
+                    <option value="mcaddon">MCADDON</option>
+                    <option value="zip">ZIP</option>
+                </select>
+            </div>
+            <div class="optionSlot">
+                <!-- <button class="actionButton" id="newExportPath">New Export path</button> -->
+                <h4>Export Directory:</h4>
+                <select id="saveMode">
+                    <option value="desktop">Desktop</option>
+                    <option value="choose">Let me decide</option>
+                </select>
+            </div>
+            <div class="optionSlot">
+                <h4>UI:</h4>
+                <select id="uiselect">
+                    <option value="default">Default</option>
+                    <option value="light">Light Mode</option>
+                    <option value="minecraft">Minecrafty</option>
+                </select>
+            </div>
+        </div>
+    </header>
+    <div id="container">
+        <h1>Add-On Compiler <span style="transition: 0.25s; font-size: 0vw;" id="selfVersion"></span></h1>
+        <div id="expand">From Blockstate Team!</div>
+        <div style="font-weight: bolder; transition: 0.25s; visibility: hidden;" id="latestScriptContainer">Latest Script Version: <span style="color: #008de5;" id="latestScriptVersion"></span></div>
+        <div id="table"></div>
+    </div>
+</body>
+</html>
