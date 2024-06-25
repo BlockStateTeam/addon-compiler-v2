@@ -4,7 +4,7 @@ import { BrowserOpenURL, WindowReload } from "/wailsjs/runtime/runtime"
 const themes = {
     "default": {
         "--background-color": "#242424",
-        "--grid-color":"#ffffff10",
+        "--grid-color":"#ffffff00",
         "--text-color": "#fff",
         "--font-size": "1.5vw",
         "--table-width": "50vw",
@@ -25,7 +25,7 @@ const themes = {
     },
     "light": {
         "--background-color": "#ffffff",
-        "--grid-color":"#00000020",
+        "--grid-color":"#00000000",
         "--text-color": "#242424",
         "--font-size": "1.5vw",
         "--table-width": "50vw",
@@ -46,7 +46,7 @@ const themes = {
     },
     "minecraft": {
         "--background-color": "#242424",
-        "--grid-color":"#ffffff10",
+        "--grid-color":"#ffffff00",
         "--text-color": "#fff",
         "--font-size": "1.3vw",
         "--table-width": "50vw",
@@ -64,7 +64,28 @@ const themes = {
         "--select-text-color": "#fff",
         "--default-font": "Minecraft",
         "--h1-font": "MinecraftTen"
-    }
+    },
+    "grid": {
+        "--background-color": "#242424",
+        "--grid-color":"#ffffff10",
+        "--text-color": "#fff",
+        "--font-size": "1.5vw",
+        "--table-width": "50vw",
+        "--table-background": "#171717",
+        "--button-background": "#666",
+        "--button-hover-background": "#393939",
+        "--button-active-background": "#000000",
+        "--header-font-size": "4vw",
+        "--h2-font-size": "2.5vw",
+        "--h3-font-size": "2.75vw",
+        "--h3-hover-font-size": "3vw",
+        "--h3-hover-color": "#80a2ff",
+        "--h4-font-size": "1.5vw",
+        "--select-background": "#393939",
+        "--select-text-color": "#fff",
+        "--default-font": "Arial, sans-serif",
+        "--h1-font": "Arial, sans-serif"
+    },
 };
 
 let userSetting;
