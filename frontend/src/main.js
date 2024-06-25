@@ -4,6 +4,7 @@ import { BrowserOpenURL, WindowReload } from "/wailsjs/runtime/runtime"
 const themes = {
     "default": {
         "--background-color": "#242424",
+        "--grid-color":"#ffffff10",
         "--text-color": "#fff",
         "--font-size": "1.5vw",
         "--table-width": "50vw",
@@ -24,6 +25,7 @@ const themes = {
     },
     "light": {
         "--background-color": "#ffffff",
+        "--grid-color":"#00000020",
         "--text-color": "#242424",
         "--font-size": "1.5vw",
         "--table-width": "50vw",
@@ -44,6 +46,7 @@ const themes = {
     },
     "minecraft": {
         "--background-color": "#242424",
+        "--grid-color":"#ffffff10",
         "--text-color": "#fff",
         "--font-size": "1.3vw",
         "--table-width": "50vw",
@@ -63,6 +66,7 @@ const themes = {
         "--h1-font": "MinecraftTen"
     }
 };
+
 let userSetting;
 let freeTable = true;
 let poi = ["BUTTON", "SELECT", "SPAN", "TD"]
