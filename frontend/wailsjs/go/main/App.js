@@ -6,6 +6,10 @@ export function CompilePack(arg1) {
   return window['go']['main']['App']['CompilePack'](arg1);
 }
 
+export function EmitMessageToNormalizePanel(arg1) {
+  return window['go']['main']['App']['EmitMessageToNormalizePanel'](arg1);
+}
+
 export function GetData(arg1) {
   return window['go']['main']['App']['GetData'](arg1);
 }
@@ -16,6 +20,10 @@ export function GetImage(arg1) {
 
 export function GetUserSetting() {
   return window['go']['main']['App']['GetUserSetting']();
+}
+
+export function Normalize(arg1, arg2) {
+  return window['go']['main']['App']['Normalize'](arg1, arg2);
 }
 
 export function Notify(arg1, arg2) {

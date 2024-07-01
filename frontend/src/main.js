@@ -1,13 +1,13 @@
-import {GetData, GetImage, Notify, NotifyText, CompilePack, OpenDirectoryDialog, UpdateScriptVersion, GetUserSetting, SaveUserSetting, SelfVersion} from '../wailsjs/go/main/App';
-import { BrowserOpenURL, WindowReload } from "/wailsjs/runtime/runtime"
-
+import {Normalize, GetData, GetImage, Notify, NotifyText, CompilePack, OpenDirectoryDialog, UpdateScriptVersion, GetUserSetting, SaveUserSetting, SelfVersion} from '../wailsjs/go/main/App';
+import { BrowserOpenURL, WindowReload, EventsOn } from "/wailsjs/runtime/runtime"
 const themes = {
     "default": {
+        "--background-normalize-panel": "rgba(0, 0, 0, 0.5)",
         "--background-color": "#242424",
         "--grid-color":"#ffffff00",
         "--text-color": "#fff",
         "--font-size": "1.5vw",
-        "--table-width": "50vw",
+        "--table-width": "60vw",
         "--table-background": "#171717",
         "--button-background": "#666",
         "--button-hover-background": "#393939",
@@ -24,11 +24,12 @@ const themes = {
         "--h1-font": "Arial, sans-serif"
     },
     "light": {
+        "--background-normalize-panel": "rgba(255, 255, 255, 0.5)",
         "--background-color": "#ffffff",
         "--grid-color":"#00000000",
         "--text-color": "#242424",
         "--font-size": "1.5vw",
-        "--table-width": "50vw",
+        "--table-width": "60vw",
         "--table-background": "#d5d5d5",
         "--button-background": "#cacaca",
         "--button-hover-background": "#ffffff",
@@ -45,11 +46,12 @@ const themes = {
         "--h1-font": "Arial, sans-serif"
     },
     "minecraft": {
+        "--background-normalize-panel": "rgba(0, 0, 0, 0.5)",
         "--background-color": "#242424",
         "--grid-color":"#ffffff00",
         "--text-color": "#fff",
         "--font-size": "1.3vw",
-        "--table-width": "50vw",
+        "--table-width": "60vw",
         "--table-background": "#171717",
         "--button-background": "#666",
         "--button-hover-background": "#393939",
@@ -66,11 +68,12 @@ const themes = {
         "--h1-font": "MinecraftTen"
     },
     "grid": {
+        "--background-normalize-panel": "rgba(0, 0, 0, 0.5)",
         "--background-color": "#242424",
         "--grid-color":"#ffffff10",
         "--text-color": "#fff",
         "--font-size": "1.5vw",
-        "--table-width": "50vw",
+        "--table-width": "60vw",
         "--table-background": "#171717",
         "--button-background": "#666",
         "--button-hover-background": "#393939",
@@ -87,7 +90,6 @@ const themes = {
         "--h1-font": "Arial, sans-serif"
     },
 };
-
 let userSetting;
 let freeTable = true;
 let poi = ["BUTTON", "SELECT", "SPAN", "TD"]
@@ -256,11 +258,12 @@ async function generateHTMLTables(inputArray) {
                 if (pack.ScriptState) scriptCurrentVersion = pack.ScriptState;
                 let projectImageBase = await GetImage(pack.Path || pack.ResourcePath);
                 tableHTML += `
-                    <tr data-current-version="${scriptCurrentVersion}" data-pack-name="${pack.CleanName}" data-pack-type="${tableName[i]}" data-pack-path="${pack.Path}" data-pack-rp-path="${pack.ResourcePath}" data-pack-bp-path="${pack.BehaviorPath}">
-                        <td><img class="projectImage" src="${projectImageBase}"></td>
-                        <td id="textCell">${pack.CleanName}</td>
-                        <td id="buttonCell1" class="updateScriptVersionButton"><button class="updateVersion" style="display:none;">Update API</button></td>
+                    <tr data-current-version="${scriptCurrentVersion}" data-pack-name="${pack.CleanName}" data-pack-type="${tableName[i]}" data-pack-path="${pack.Path}" data-pack-rp-path="${pack.ResourcePath}" data-pack-bp-path="${pack.BehaviorPath}" data-pack-signatures="${pack.IsSignatures}">
+                        <td class="noneData"><img class="projectImage" src="${projectImageBase}"></td>
+                        <td id="textCell" class="averageTextCell">${pack.CleanName}</td>
+                        <td id="buttonCell1" class="updateScriptVersionButton"><button class="updateVersion" style="visibility:hidden;">Update API</button></td>
                         <td id="buttonCell2"><button class="compileButton">Compile</button></td>
+                        <td id="buttonCell3" class="normalizeButton"><button class="normalizePack" style="visibility:hidden;">Normalize Pack</button></td>
                     </tr>`;
             }
         }
@@ -293,10 +296,17 @@ function updateCheck() {
             let latestVersion = smallerStrings.map(item => Number(item)).join('.') + '-beta';
             document.getElementById('latestScriptVersion').innerText = latestVersion;
             document.getElementById('latestScriptContainer').style.visibility = 'visible';
+            [...document.getElementsByClassName('normalizeButton')].forEach(button => {
+                let boolValue = (button.closest('tr').getAttribute("data-pack-signatures") === "true") ? true : false;
+                if (boolValue) {
+                    console.log(boolValue)
+                    button.querySelector('button').style.visibility = 'visible';
+                };
+            });
             [...document.getElementsByClassName('updateScriptVersionButton')].forEach(button => {
                 let currentVersion = button.closest('tr').getAttribute("data-current-version");
-                if (currentVersion !== "null-script" && currentVersion !== latestVersion) {
-                    button.querySelector('button').style.display = 'inline-block'
+                if (currentVersion !== "null-script" && currentVersion.endsWith("-beta") && currentVersion !== latestVersion) {
+                    button.querySelector('button').style.visibility = 'visible';
                 };
             });
         } catch (error) {
@@ -359,6 +369,28 @@ function reload() {
                                 Notify(`Finished compiling: \n ${packName}.${format}`, packIcon);
                             });
                         }
+                    } else if (button.classList.contains('normalizePack')) {
+                        console.log("Normalizing Pack");
+                        document.getElementById('normalizePanel').style.visibility = 'visible';
+                        Normalize(dataElement.getAttribute('data-pack-rp-path'), dataElement.getAttribute('data-pack-bp-path')).then((result) => {
+                            console.log(result);
+                            if (result === "Done") {
+                                NotifyText(`Finished Normalizing: ${dataElement.getAttribute('data-pack-name')}`);
+                                document.getElementById('normalizePanel').style.visibility = 'hidden';
+                            }
+                        });
+                        EventsOn('stage:name', (stage) => {
+                            console.log("STAGE: " + stage);
+                            document.getElementById('animatingText').textContent = stage;
+                        });
+                        let dataLines = [];
+                        EventsOn('file:rename', (data) => {
+                            dataLines.push(data);
+                            if (dataLines.length > 10) {
+                                dataLines.shift();
+                            }
+                            document.getElementById('normalizePanelText').innerHTML = dataLines.join('<br><br>');
+                        });
                     }
                 });
             });

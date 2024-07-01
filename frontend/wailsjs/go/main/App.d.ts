@@ -3,11 +3,15 @@
 
 export function CompilePack(arg1:string):Promise<void>;
 
+export function EmitMessageToNormalizePanel(arg1:string):Promise<void>;
+
 export function GetData(arg1:boolean):Promise<string>;
 
 export function GetImage(arg1:string):Promise<string>;
 
 export function GetUserSetting():Promise<string>;
+
+export function Normalize(arg1:string,arg2:string):Promise<string>;
 
 export function Notify(arg1:string,arg2:string):Promise<void>;
 

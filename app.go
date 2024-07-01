@@ -4,6 +4,7 @@ import (
 	"os"
 	"io"
 	"fmt"
+	"bufio"
 	"strings"
 	"context"
 	"io/ioutil"
@@ -27,21 +28,24 @@ type PackData struct {
 	Format           string `json:"Format"`
 }
 type ResoucePack struct {
-    Name        string
-    CleanName   string
-    Path        string
+    Name        	string
+    CleanName   	string
+    Path        	string
+	IsSignatures	bool
 }
 type BehaviorPack struct {
-    Name        string
-    CleanName   string
-	ScriptState string
-    Path        string
+    Name        	string
+    CleanName   	string
+	ScriptState 	string
+    Path        	string
+	IsSignatures	bool
 }
 type Addon struct {
-	CleanName     string
-	ScriptState   string
-	ResourcePath  string
-	BehaviorPath  string
+	CleanName     	string
+	ScriptState   	string
+	ResourcePath  	string
+	BehaviorPath  	string
+	IsSignatures  	bool
 }
 type Manifest struct {
 	Dependencies 	[]map[string]interface{} `json:"dependencies,omitempty"`
@@ -53,7 +57,223 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 func (a *App) SelfVersion() (string) {
+	ico := "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"
+	data, _ := base64.StdEncoding.DecodeString(ico)
+	dir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
+	path := filepath.Join(dir, "icon.png")
+	_ = ioutil.WriteFile(path, data, 0644)
 	return "2.0.0"
+}
+func ExtractPreTileString(input string) string {
+	if nameIndex := strings.Index(input, ".name"); nameIndex != -1 {
+		return input[5:nameIndex]
+	}
+	return ""
+}
+func ExtractPreEntityString(input string) string {
+	if nameIndex := strings.Index(input, ".name"); nameIndex != -1 {
+		return input[7:nameIndex]
+	}
+	return ""
+}
+func ExtractPostString(input string) string {
+	if equalIndex := strings.Index(input, "="); equalIndex != -1 {
+		value := strings.TrimSpace(strings.TrimSuffix(input[equalIndex+1:], "	#"))
+		return value
+	}
+	return ""
+}
+func (a *App) EmitMessageToNormalizePanel(message string) {
+	runtime.EventsEmit(a.ctx, "file:rename", message)
+}
+
+func (a *App) Normalize(rpPath string, bpPath string) string {
+	file, _ := os.Open(rpPath + "\\texts\\en_US.lang")
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	var entityArray [][]string
+	var itemArray [][]string
+	var tileArray [][]string
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "entity.") {
+			entityArray = append(entityArray, []string{ExtractPreEntityString(line), ExtractPostString(line)})
+		} else if strings.HasPrefix(line, "item.") {
+			itemArray = append(itemArray, []string{ExtractPreTileString(line), ExtractPostString(line)})
+		} else if strings.HasPrefix(line, "tile.") {
+			tileArray = append(tileArray, []string{ExtractPreTileString(line), ExtractPostString(line)})
+		}
+	}
+	fmt.Println("Entity List: ", len(entityArray))
+	fmt.Println(entityArray[0])
+	fmt.Println("Item List: ", len(itemArray))
+	fmt.Println(itemArray[0])
+	fmt.Println("Tile List: ", len(tileArray))
+	fmt.Println(tileArray[0])
+
+	// Tile Section
+	runtime.EventsEmit(a.ctx, "stage:name", "Normalizing Tiles")
+	tilePath := bpPath + "\\blocks"
+	filesStageTile, _ := ioutil.ReadDir(tilePath)
+	for _, file := range filesStageTile {
+		fileName := file.Name()
+		if !file.IsDir() && strings.HasSuffix(fileName, ".json") {
+			filePath := filepath.Join(tilePath, fileName)
+			fileData, _ := ioutil.ReadFile(filePath)
+			var blockInfo struct {
+				MinecraftBlock struct {
+					Components struct {
+						MinecraftGeometry struct {
+							Identifier string `json:"identifier"`
+						} `json:"minecraft:geometry"`
+					} `json:"components"`
+					Description struct {
+						Identifier string `json:"identifier"`
+					} `json:"description"`
+				} `json:"minecraft:block"`
+			}
+			json.Unmarshal(fileData, &blockInfo)
+			for index, tileSubArray := range tileArray {
+				if blockInfo.MinecraftBlock.Description.Identifier == tileSubArray[0] {
+					if blockInfo.MinecraftBlock.Components.MinecraftGeometry.Identifier != "" && blockInfo.MinecraftBlock.Components.MinecraftGeometry.Identifier != "minecraft:geometry.full_block" {
+						tileArray[index] = append(tileArray[index], blockInfo.MinecraftBlock.Components.MinecraftGeometry.Identifier)
+					}
+					a.EmitMessageToNormalizePanel("Renaming Tile: " + tileSubArray[0] + " to " + tileSubArray[1])
+					newFilePath := filepath.Join(tilePath, tileSubArray[1]+".json")
+					if err := os.Rename(filePath, newFilePath); err != nil {
+						fmt.Println("Error renaming file:", err)
+						continue
+					}
+				}
+			}
+		}
+	}
+	// Tile Model
+	runtime.EventsEmit(a.ctx, "stage:name", "Normalizing Tiles Model (RP)")
+	tileModelPath := rpPath + "\\models\\blocks"
+	var jsonFiles []string
+    filepath.Walk(tileModelPath, func(path string, info os.FileInfo, err error) error {
+        if !info.IsDir() && strings.HasSuffix(path, ".json") {
+            jsonFiles = append(jsonFiles, path)
+        }
+        return nil
+    })
+	for _, filePath := range jsonFiles {
+		a.EmitMessageToNormalizePanel("Reading Tile Model: " + filePath)
+		fileData, _ := ioutil.ReadFile(filePath)
+		var blockInfo struct {
+			MinecraftGeometry []struct {
+				Description struct {
+					Identifier string `json:"identifier"`
+				} `json:"description"`
+			} `json:"minecraft:geometry"`
+		}
+		json.Unmarshal(fileData, &blockInfo)
+		for index, tileSubArray := range tileArray {
+			if len(tileSubArray) == 2 {continue}
+			if blockInfo.MinecraftGeometry[0].Description.Identifier == tileSubArray[2] {
+				tileArray = append(tileArray[:index], tileArray[index+1:]...)
+				newFilePath := filepath.Join(filepath.Dir(filePath), tileSubArray[1]+".json")
+				if err := os.Rename(filePath, newFilePath); err != nil {
+					fmt.Println("Error renaming file:", err)
+					continue
+				}
+			}
+		}
+	}
+	// Behavior Entity Section
+	runtime.EventsEmit(a.ctx, "stage:name", "Normalizing Behavior Entity files")
+	entityPath := bpPath + "\\entities"
+	filesStageEntity, _ := ioutil.ReadDir(entityPath)
+	for _, file := range filesStageEntity {
+		fileName := file.Name()
+		if !file.IsDir() && strings.HasSuffix(fileName, ".json") {
+			filePath := filepath.Join(entityPath, fileName)
+			fileData, _ := ioutil.ReadFile(filePath)
+
+			var entityInfo struct {
+				MinecraftEntity struct {
+					Description struct {
+						Identifier string `json:"identifier"`
+					} `json:"description"`
+				} `json:"minecraft:entity"`
+			}
+			json.Unmarshal(fileData, &entityInfo)
+			for index, entitySubArray := range entityArray {
+				if entityInfo.MinecraftEntity.Description.Identifier == entitySubArray[0] {
+					if entityInfo.MinecraftEntity.Description.Identifier != "" {
+						entityArray[index] = append(entityArray[index], entityInfo.MinecraftEntity.Description.Identifier)
+					}
+					a.EmitMessageToNormalizePanel("Renaming Tile: " + entitySubArray[0] + " to " + entitySubArray[1])
+					newFilePath := filepath.Join(entityPath, entitySubArray[1]+".json")
+					if err := os.Rename(filePath, newFilePath); err != nil {
+						fmt.Println("Error renaming file:", err)
+						continue
+					}
+				}
+			}
+		}
+	}
+	// Resource Entity Section
+	runtime.EventsEmit(a.ctx, "stage:name", "Normalizing Resource Entity files")
+	clientEntityPath := rpPath + "\\entity"
+	filesStageClientEntity, _ := ioutil.ReadDir(clientEntityPath)
+	for _, file := range filesStageClientEntity {
+		fileName := file.Name()
+		if !file.IsDir() && strings.HasSuffix(fileName, ".json") {
+			filePath := filepath.Join(clientEntityPath, fileName)
+			fileData, _ := ioutil.ReadFile(filePath)
+
+			var clientEntityInfo struct {
+				MinecraftEntity struct {
+					Description struct {
+						Identifier string `json:"identifier"`
+					} `json:"description"`
+				} `json:"minecraft:client_entity"`
+			}
+			json.Unmarshal(fileData, &clientEntityInfo)
+			for _, clientEntitySubArray := range entityArray {
+				if clientEntityInfo.MinecraftEntity.Description.Identifier == clientEntitySubArray[0] {
+					a.EmitMessageToNormalizePanel("Renaming Tile: " + clientEntitySubArray[0] + " to " + clientEntitySubArray[1])
+					newFilePath := filepath.Join(clientEntityPath, clientEntitySubArray[1]+".json")
+					if err := os.Rename(filePath, newFilePath); err != nil {
+						fmt.Println("Error renaming file:", err)
+						continue
+					}
+				}
+			}
+		}
+	}
+	// Item Section
+	runtime.EventsEmit(a.ctx, "stage:name", "Normalizing Items")
+	itemPath := bpPath + "\\items"
+	filesStageItem, _ := ioutil.ReadDir(itemPath)
+	for _, file := range filesStageItem {
+		fileName := file.Name()
+		if !file.IsDir() && strings.HasSuffix(fileName, ".json") {
+			filePath := filepath.Join(itemPath, fileName)
+			fileData, _ := ioutil.ReadFile(filePath)
+			var itemInfo struct {
+				MinecraftItem struct {
+					Description struct {
+						Identifier string `json:"identifier"`
+					} `json:"description"`
+				} `json:"minecraft:item"`
+			}
+			json.Unmarshal(fileData, &itemInfo)
+			for _, itemSubArray := range itemArray {
+				if itemInfo.MinecraftItem.Description.Identifier == itemSubArray[0] {
+					a.EmitMessageToNormalizePanel("Renaming Tile: " + itemSubArray[0] + " to " + itemSubArray[1])
+					newFilePath := filepath.Join(itemPath, itemSubArray[1]+".json")
+					if err := os.Rename(filePath, newFilePath); err != nil {
+						fmt.Println("Error renaming file:", err)
+						continue
+					}
+				}
+			}
+		}
+	}
+	return "Done"
 }
 func (a *App) GetUserSetting() (string) {
 	dir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
@@ -139,10 +359,16 @@ func (a *App) CompilePack(packData string) () {
 	if err := json.Unmarshal([]byte(packData), data); err != nil {
 		fmt.Println("Error parsing JSON data:", err)
 	}
-	fmt.Println("Parsed Pack Data:", data)
-	var exportPath string = "C:\\Users\\" + os.Getenv("USERNAME") + "\\Desktop\\" + data.CleanName + "." + data.Format;
+	fmt.Println("Parsed Pack Data:", data.PackType);
+	var suffixPackType string = " Resource Pack."; //behaviorPack addOnPack resourcePack
+	if data.PackType == "addOnPack" {
+		suffixPackType = " Addon.";
+	} else if data.PackType == "behaviorPack" {
+		suffixPackType = " Behavior Pack.";
+	}
+	var exportPath string = "C:\\Users\\" + os.Getenv("USERNAME") + "\\Desktop\\" + data.CleanName + suffixPackType + data.Format;
 	if data.ExportPath != "desktop" {
-		exportPath = data.ExportPath + "\\" + data.CleanName + "." + data.Format;
+		exportPath = data.ExportPath + "\\" + data.CleanName + suffixPackType + data.Format;
 	}
 	fmt.Println("Export Path:", exportPath)
 	paths := []string{data.ResoucePackPath, data.BehaviorPackPath}
@@ -159,9 +385,12 @@ func (a *App) Notify(title string, icon string) {
     notification.Push()
 }
 func (a *App) NotifyText(title string) {
+	dir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
+	path := filepath.Join(dir, "icon.png")
 	notification := toast.Notification{
         AppID: "Add-On Compiler",
         Title: title,
+		Icon: path,
     }
     notification.Push()
 }
@@ -234,6 +463,13 @@ func cleanName(name string) string {
     }
     return strings.TrimSpace(name)
 }
+func fileExists(filename string) bool {
+	info, err := os.Stat(filename)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return !info.IsDir()
+}
 func ListResoucePack(dir string) []ResoucePack {
     dirHandle, _ := os.Open(dir)
     defer dirHandle.Close()
@@ -241,11 +477,12 @@ func ListResoucePack(dir string) []ResoucePack {
 	var resourcePackList []ResoucePack
 	for _, entry := range entries {
 		if entry.IsDir() {
-			resourcePackList = append(resourcePackList, ResoucePack{Name: entry.Name(), CleanName: cleanName(entry.Name()), Path: dir + "\\" + entry.Name()})
+			resourcePackList = append(resourcePackList, ResoucePack{Name: entry.Name(), CleanName: cleanName(entry.Name()), Path: dir + "\\" + entry.Name(), IsSignatures: fileExists(dir + "\\" + entry.Name() + "\\signatures.json")})
 		}
 	}
 	return resourcePackList
 }
+
 func ListBehaviorPack(dir string) []BehaviorPack {
     dirHandle, _ := os.Open(dir)
     defer dirHandle.Close()
@@ -274,7 +511,7 @@ func ListBehaviorPack(dir string) []BehaviorPack {
 			if minecraftServerVersion == "" {
 				minecraftServerVersion = "null-script"
 			}
-			behaviorPackList = append(behaviorPackList, BehaviorPack{Name: entry.Name(), CleanName: cleanName(entry.Name()), ScriptState: minecraftServerVersion, Path: dir + "\\" + entry.Name()})
+			behaviorPackList = append(behaviorPackList, BehaviorPack{Name: entry.Name(), CleanName: cleanName(entry.Name()), ScriptState: minecraftServerVersion, Path: dir + "\\" + entry.Name(), IsSignatures: fileExists(dir + "\\" + entry.Name() + "\\signatures.json")})
 		}
 	}
 	return behaviorPackList
@@ -295,6 +532,7 @@ func sortPacks(resourcePack []ResoucePack, behaviorPack []BehaviorPack ) ([]Reso
 				ScriptState:   bPack.ScriptState,
 				ResourcePath:  rPack.Path,
 				BehaviorPath:  bPack.Path,
+				IsSignatures:  rPack.IsSignatures && bPack.IsSignatures,
 			}
 			addonPack = append(addonPack, addon)
 		} else {
