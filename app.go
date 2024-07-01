@@ -62,7 +62,7 @@ func (a *App) SelfVersion() (string) {
 	dir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
 	path := filepath.Join(dir, "icon.png")
 	_ = ioutil.WriteFile(path, data, 0644)
-	return "2.0.0"
+	return "2.1.0"
 }
 func ExtractPreTileString(input string) string {
 	if nameIndex := strings.Index(input, ".name"); nameIndex != -1 {
