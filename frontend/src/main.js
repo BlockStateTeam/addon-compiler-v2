@@ -195,7 +195,7 @@ SelfVersion().then(version => {
         let currentVersion = version.split('.');
         if (+latestVersion[0] * 1000000 + +latestVersion[1] * 1000 + +latestVersion[2] > +currentVersion[0] * 1000000 + +currentVersion[1] * 1000 + +currentVersion[2]) {
             console.log("New Version Available");
-            AutoUpdate(data.sha256, data.downloadUrl).then(message => {
+            AutoUpdate(data.downloadUrl).then(message => {
                 console.log(message);
             })
         };

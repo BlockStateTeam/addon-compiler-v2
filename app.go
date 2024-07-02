@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"io/ioutil"
 	"archive/zip"
-	"crypto/sha256"
 	"path/filepath"
     "encoding/json"
 	"encoding/base64"
@@ -67,7 +66,7 @@ func (a *App) SelfVersion() (string) {
 	return "2.0.0"
 }
 
-func (a *App) AutoUpdate(sha256Confirm, downloadUrl string) string {
+func (a *App) AutoUpdate(downloadUrl string) string {
     dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
     if err != nil {
         return fmt.Sprintf("Error determining directory: %v", err)
@@ -81,30 +80,24 @@ func (a *App) AutoUpdate(sha256Confirm, downloadUrl string) string {
 
     resp, err := http.Get(downloadUrl)
     if err != nil {
+		os.Remove(filePath)
         return fmt.Sprintf("Error downloading file: %v", err)
     }
     defer resp.Body.Close()
     if resp.StatusCode != http.StatusOK {
+		os.Remove(filePath)
         return fmt.Sprintf("Bad status: %s", resp.Status)
     }
     if _, err := io.Copy(out, resp.Body); err != nil {
+		os.Remove(filePath)
         return fmt.Sprintf("Error saving file: %v", err)
     }
-
+	sha256Match := true;
     file, err := os.Open(filePath)
     if err != nil {
         return fmt.Sprintf("Error opening file: %v", err)
     }
     defer file.Close()
-
-    hash := sha256.New()
-    if _, err := io.Copy(hash, file); err != nil {
-        return fmt.Sprintf("Error calculating checksum: %v", err)
-    }
-    if sha256Sum := fmt.Sprintf("%x", hash.Sum(nil)); sha256Sum != sha256Confirm {
-        os.Remove(filePath)
-        return "Warning! There's a bad actor wanting to mess with your computer."
-    }
 
 	executablePath, err := os.Executable()
 	if err != nil {
