@@ -185,24 +185,6 @@ function applyTheme(themeVariables) {
 }
 SelfVersion().then(version => {
     document.getElementById('selfVersion').textContent = "v" + version;
-    fetch('https://compiler.blockstate.team/index.json')
-    .then(response => {
-        if (!response.ok) throw new Error('Network response was not ok ' + response.statusText);
-        return response.json();
-    })
-    .then(data => {
-        let latestVersion = data.version.split('.');
-        let currentVersion = version.split('.');
-        if (+latestVersion[0] * 1000000 + +latestVersion[1] * 1000 + +latestVersion[2] > +currentVersion[0] * 1000000 + +currentVersion[1] * 1000 + +currentVersion[2]) {
-            console.log("New Version Available");
-            AutoUpdate(data.downloadUrl).then(message => {
-                console.log(message);
-            })
-        };
-    })
-    .catch(error => {
-        console.error('There was a problem with the fetch operation:', error);
-    });
 });
 GetUserSetting().then(data => {
     userSetting = JSON.parse(data);

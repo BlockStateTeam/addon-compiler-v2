@@ -65,58 +65,6 @@ func (a *App) SelfVersion() (string) {
 	_ = ioutil.WriteFile(path, data, 0644)
 	return "2.0.0"
 }
-
-func (a *App) AutoUpdate(downloadUrl string) string {
-    dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
-    if err != nil {
-        return fmt.Sprintf("Error determining directory: %v", err)
-    }
-    filePath := filepath.Join(dir, "Add-On Compiler-NEW.exe")
-    out, err := os.Create(filePath)
-    if err != nil {
-        return fmt.Sprintf("Error creating file: %v", err)
-    }
-    defer out.Close()
-
-    resp, err := http.Get(downloadUrl)
-    if err != nil {
-		os.Remove(filePath)
-        return fmt.Sprintf("Error downloading file: %v", err)
-    }
-    defer resp.Body.Close()
-    if resp.StatusCode != http.StatusOK {
-		os.Remove(filePath)
-        return fmt.Sprintf("Bad status: %s", resp.Status)
-    }
-    if _, err := io.Copy(out, resp.Body); err != nil {
-		os.Remove(filePath)
-        return fmt.Sprintf("Error saving file: %v", err)
-    }
-	sha256Match := true;
-    file, err := os.Open(filePath)
-    if err != nil {
-        return fmt.Sprintf("Error opening file: %v", err)
-    }
-    defer file.Close()
-
-	executablePath, err := os.Executable()
-	if err != nil {
-		return fmt.Sprintf("Error when getting Executable Path: %v", err)
-	}
-
-	oldName := filepath.Base(executablePath)
-	newName := fmt.Sprintf("%s-OLD%s", oldName[:len(oldName)-len(filepath.Ext(oldName))], filepath.Ext(oldName))
-	newPath := filepath.Join(filepath.Dir(executablePath), newName)
-
-	if err := os.Rename(executablePath, newPath); err != nil {
-		return fmt.Sprintf("Error renaming Old: %v", err)
-	}
-	if err := os.Rename(filePath, executablePath); err != nil {
-		return fmt.Sprintf("Error renaming Update: %v", err)
-	}
-    return "File downloaded and verified successfully."
-}
-
 func ExtractPreTileString(input string) string {
 	if nameIndex := strings.Index(input, ".name"); nameIndex != -1 {
 		return input[5:nameIndex]
