@@ -7,8 +7,10 @@ import (
 	"bufio"
 	"strings"
 	"context"
+	"net/http"
 	"io/ioutil"
 	"archive/zip"
+	"crypto/sha256"
 	"path/filepath"
     "encoding/json"
 	"encoding/base64"
@@ -62,8 +64,66 @@ func (a *App) SelfVersion() (string) {
 	dir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
 	path := filepath.Join(dir, "icon.png")
 	_ = ioutil.WriteFile(path, data, 0644)
-	return "2.1.0"
+	return "2.0.0"
 }
+
+func (a *App) AutoUpdate(sha256Confirm, downloadUrl string) string {
+    dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
+    if err != nil {
+        return fmt.Sprintf("Error determining directory: %v", err)
+    }
+    filePath := filepath.Join(dir, "Add-On Compiler-NEW.exe")
+    out, err := os.Create(filePath)
+    if err != nil {
+        return fmt.Sprintf("Error creating file: %v", err)
+    }
+    defer out.Close()
+
+    resp, err := http.Get(downloadUrl)
+    if err != nil {
+        return fmt.Sprintf("Error downloading file: %v", err)
+    }
+    defer resp.Body.Close()
+    if resp.StatusCode != http.StatusOK {
+        return fmt.Sprintf("Bad status: %s", resp.Status)
+    }
+    if _, err := io.Copy(out, resp.Body); err != nil {
+        return fmt.Sprintf("Error saving file: %v", err)
+    }
+
+    file, err := os.Open(filePath)
+    if err != nil {
+        return fmt.Sprintf("Error opening file: %v", err)
+    }
+    defer file.Close()
+
+    hash := sha256.New()
+    if _, err := io.Copy(hash, file); err != nil {
+        return fmt.Sprintf("Error calculating checksum: %v", err)
+    }
+    if sha256Sum := fmt.Sprintf("%x", hash.Sum(nil)); sha256Sum != sha256Confirm {
+        os.Remove(filePath)
+        return "Warning! There's a bad actor wanting to mess with your computer."
+    }
+
+	executablePath, err := os.Executable()
+	if err != nil {
+		return fmt.Sprintf("Error when getting Executable Path: %v", err)
+	}
+
+	oldName := filepath.Base(executablePath)
+	newName := fmt.Sprintf("%s-OLD%s", oldName[:len(oldName)-len(filepath.Ext(oldName))], filepath.Ext(oldName))
+	newPath := filepath.Join(filepath.Dir(executablePath), newName)
+
+	if err := os.Rename(executablePath, newPath); err != nil {
+		return fmt.Sprintf("Error renaming Old: %v", err)
+	}
+	if err := os.Rename(filePath, executablePath); err != nil {
+		return fmt.Sprintf("Error renaming Update: %v", err)
+	}
+    return "File downloaded and verified successfully."
+}
+
 func ExtractPreTileString(input string) string {
 	if nameIndex := strings.Index(input, ".name"); nameIndex != -1 {
 		return input[5:nameIndex]

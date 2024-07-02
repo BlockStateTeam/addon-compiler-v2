@@ -1,4 +1,4 @@
-import {Normalize, GetData, GetImage, Notify, NotifyText, CompilePack, OpenDirectoryDialog, UpdateScriptVersion, GetUserSetting, SaveUserSetting, SelfVersion} from '../wailsjs/go/main/App';
+import {Normalize, GetData, GetImage, Notify, NotifyText, CompilePack, OpenDirectoryDialog, UpdateScriptVersion, GetUserSetting, SaveUserSetting, SelfVersion, AutoUpdate} from '../wailsjs/go/main/App';
 import { BrowserOpenURL, WindowReload, EventsOn } from "/wailsjs/runtime/runtime"
 const themes = {
     "default": {
@@ -183,8 +183,26 @@ function applyTheme(themeVariables) {
         root.style.setProperty(name, value);
     }
 }
-SelfVersion().then(version =>{
+SelfVersion().then(version => {
     document.getElementById('selfVersion').textContent = "v" + version;
+    fetch('https://compiler.blockstate.team/index.json')
+    .then(response => {
+        if (!response.ok) throw new Error('Network response was not ok ' + response.statusText);
+        return response.json();
+    })
+    .then(data => {
+        let latestVersion = data.version.split('.');
+        let currentVersion = version.split('.');
+        if (+latestVersion[0] * 1000000 + +latestVersion[1] * 1000 + +latestVersion[2] > +currentVersion[0] * 1000000 + +currentVersion[1] * 1000 + +currentVersion[2]) {
+            console.log("New Version Available");
+            AutoUpdate(data.sha256, data.downloadUrl).then(message => {
+                console.log(message);
+            })
+        };
+    })
+    .catch(error => {
+        console.error('There was a problem with the fetch operation:', error);
+    });
 });
 GetUserSetting().then(data => {
     userSetting = JSON.parse(data);
@@ -325,7 +343,6 @@ function reload() {
     console.log(isDevMode);
     GetData(isDevMode).then(data => {
         const result = JSON.parse(data);
-        console.log(result);
         generateHTMLTables(result).then(tables => {
             freeTable = true;
             document.getElementById('table').innerHTML = tables;
@@ -352,7 +369,6 @@ function reload() {
                             "ExportPath": "desktop",
                             "Format": document.getElementById("saveFormat").value
                         }
-                        console.log(packData);
                         let format = document.getElementById("saveFormat").value;
                         if (document.getElementById("saveMode").value === "choose") {
                             OpenDirectoryDialog({
@@ -370,17 +386,14 @@ function reload() {
                             });
                         }
                     } else if (button.classList.contains('normalizePack')) {
-                        console.log("Normalizing Pack");
                         document.getElementById('normalizePanel').style.visibility = 'visible';
                         Normalize(dataElement.getAttribute('data-pack-rp-path'), dataElement.getAttribute('data-pack-bp-path')).then((result) => {
-                            console.log(result);
                             if (result === "Done") {
                                 NotifyText(`Finished Normalizing: ${dataElement.getAttribute('data-pack-name')}`);
                                 document.getElementById('normalizePanel').style.visibility = 'hidden';
                             }
                         });
                         EventsOn('stage:name', (stage) => {
-                            console.log("STAGE: " + stage);
                             document.getElementById('animatingText').textContent = stage;
                         });
                         let dataLines = [];
