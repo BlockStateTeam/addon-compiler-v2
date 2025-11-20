@@ -8,20 +8,19 @@ This repository contains a tool built with the Wails framework to compile Minecr
 
 - Good UI: Who doesn't like a good UI?
 
-# Requirements #
-Wails framework installed on your system. [Installation instructions can be found here](https://wails.io/docs/gettingstarted/installation)
-
-Go 1.16 or later installed on your system.
-
-Node.js and npm for building the frontend.
-
-
-
 # Installation #
 
 ### You can [download the program here](https://github.com/BlockStateTeam/addon-compiler-v2/releases) ###
-### Or compile it yourself:
+### Or compile it yourself (Tutorial below):
 
+# Developement #
+You will need: 
+
+1. Wails framework installed on your system. [Installation instructions can be found here](https://wails.io/docs/gettingstarted/installation)
+
+2. Go 1.16 or later installed on your system.
+
+3. Node.js and npm for building the frontend.
 
 Clone this repository to your local machine:
 
