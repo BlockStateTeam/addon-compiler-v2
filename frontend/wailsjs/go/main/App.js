@@ -14,10 +14,6 @@ export function GetData() {
   return window['go']['main']['App']['GetData']();
 }
 
-export function GetImage(arg1) {
-  return window['go']['main']['App']['GetImage'](arg1);
-}
-
 export function GetUserSetting() {
   return window['go']['main']['App']['GetUserSetting']();
 }
@@ -34,8 +30,8 @@ export function NotifyText(arg1) {
   return window['go']['main']['App']['NotifyText'](arg1);
 }
 
-export function OpenDirectoryDialog() {
-  return window['go']['main']['App']['OpenDirectoryDialog']();
+export function OpenDirectoryDialogCall() {
+  return window['go']['main']['App']['OpenDirectoryDialogCall']();
 }
 
 export function SaveUserSetting(arg1) {
@@ -44,6 +40,10 @@ export function SaveUserSetting(arg1) {
 
 export function SelfVersion() {
   return window['go']['main']['App']['SelfVersion']();
+}
+
+export function UninstallApp() {
+  return window['go']['main']['App']['UninstallApp']();
 }
 
 export function UpdateScriptVersion(arg1, arg2) {

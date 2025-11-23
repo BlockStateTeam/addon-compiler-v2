@@ -1,15 +1,30 @@
-@font-face { font-family: Minecraft; src: url('./Minecraft.otf'); }
-@font-face { font-family: MinecraftTen; src: url('./MinecraftTen.otf'); }
+@font-face {
+    font-family: Minecraft;
+    src: url("./Minecraft.otf");
+}
+@font-face {
+    font-family: MinecraftTen;
+    src: url("./MinecraftTen.otf");
+}
 
 /* Keyframe Area */
-@keyframes loader { 0% { background-position-y: 0px; } 99.9% { background-position-y: var(--grid-size); } 100% { background-position-y: 0px; } }
+@keyframes loader {
+    0% {
+        background-position-y: 0px;
+    }
+    99.9% {
+        background-position-y: var(--grid-size);
+    }
+    100% {
+        background-position-y: 0px;
+    }
+}
 :root {
     --background-normalize-panel: rgba(0, 0, 0, 0.5);
     --background-color: #242424;
     --grid-color: #ff000000;
     --text-color: #fff;
     --font-size: 1.5vw;
-    --table-width: 70vw;
     --table-background: #171717;
     --button-background: #666;
     --button-hover-background: #393939;
@@ -28,12 +43,12 @@
     --animation-speed: 6s;
     --gradient-definition: #00000000 90deg, var(--grid-color) 0;
 }
-#animatingText{
-    height: 5vh; 
-    text-align: center; 
-    padding: 2vh; 
-    font-size: 2.5vw; 
-    font-weight: bolder; 
+#animatingText {
+    height: 5vh;
+    text-align: center;
+    padding: 2vh;
+    font-size: 2.5vw;
+    font-weight: bolder;
     z-index: 101;
     position: relative;
 }
@@ -44,29 +59,10 @@
     width: 0;
 }
 .averageTextCell {
-    width: 22vw;
-}
-#normalizePanelText{
-    height: 40vh; 
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-    text-align: left; 
-    padding: 2vh; 
-    z-index: 101; 
-    position: relative;
-    overflow: hidden;
-}
-#normalizePanel {
-    left: 10vw;
-    top: 25vh;
-    width: 80vw;
-    height: 60vh;
-    position: fixed;
-    background-color: var(--button-background);
-    visibility: hidden;
+    width: 40vw;
 }
 body {
+    width: 100vw;
     transition: 0.25s;
     user-select: none;
     overflow-x: hidden;
@@ -77,14 +73,14 @@ body {
     display: flex;
     flex-direction: column;
     justify-content: center;
-    background: conic-gradient(from 90deg at 2px 2px,var(--gradient-definition)), conic-gradient(from 90deg at 1px 1px,var(--gradient-definition)), var(--background-color);
-    background-size: var(--grid-size) var(--grid-size), calc(var(--grid-size)/5) calc(var(--grid-size)/5);
+    background:
+        conic-gradient(from 90deg at 2px 2px, var(--gradient-definition)),
+        conic-gradient(from 90deg at 1px 1px, var(--gradient-definition)),
+        var(--background-color);
+    background-size:
+        var(--grid-size) var(--grid-size),
+        calc(var(--grid-size) / 5) calc(var(--grid-size) / 5);
     animation: loader var(--animation-speed) linear infinite;
-}
-table {
-    width: var(--table-width);
-    border-collapse: collapse;
-    margin-bottom: 20px;
 }
 
 .actionButton {
@@ -93,14 +89,6 @@ table {
 }
 .actionButton:hover {
     background-color: #393939;
-}
-
-tr:hover {
-    font-size: larger;
-    height: 12vh;
-    background-color: var(--table-background);
-    letter-spacing: 1.5px;
-    text-shadow: 1px 0 0 white;
 }
 
 button {
@@ -169,8 +157,8 @@ select:hover {
 #infoBox {
     display: none;
     z-index: 50;
-    position: fixed; 
-    left:0; 
+    position: fixed;
+    left: 0;
     top: 0;
     background-color: gray;
     padding: 0.5vw;

@@ -8,9 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
+	"syscall"
+	"unsafe"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"gopkg.in/toast.v1"
@@ -19,27 +24,46 @@ import (
 type App struct {
 	ctx context.Context
 }
+type ZipAsset struct {
+	SourcePath string
+	ZipPath    string
+}
 type PackData struct {
-	CleanName        string `json:"CleanName"`
-	PackType         string `json:"PackType"`
-	ResoucePackPath  string `json:"ResoucePackPath"`
-	BehaviorPackPath string `json:"BehaviorPackPath"`
-	ExportPath       string `json:"ExportPath"`
-	Format           string `json:"Format"`
+	CleanName  string `json:"CleanName"`
+	PackType   string `json:"PackType"`
+	PackPath   string `json:"PackPath"`
+	ExportPath string `json:"ExportPath"`
+	Format     string `json:"Format"`
+	RequiredRP string `json:"RequiredRP"`
+	RequiredBP string `json:"RequiredBP"`
 }
 type ResourcePack struct {
 	CleanName    string
+	Icon         string
 	Path         string
 	UUID         string
 	IsSignatures bool
 }
 type BehaviorPack struct {
 	CleanName        string
+	Icon             string
 	ScriptState      string
 	Path             string
 	UUID             string
 	DependenciesUUID []string
 	IsSignatures     bool
+}
+type RequiredPacks struct {
+	CleanName string
+	Path      string
+	Icon      string
+}
+type WorldData struct {
+	CleanName  string
+	Path       string
+	Icon       string
+	RequiredRP string
+	RequiredBP string
 }
 type Addon struct {
 	CleanName    string
@@ -53,6 +77,57 @@ type Manifest struct {
 	} `json:"header"`
 	Dependencies []map[string]interface{} `json:"dependencies,omitempty"`
 }
+type Nameable interface {
+	GetCleanName() string
+}
+
+func SortByCleanName[T Nameable](items []T) {
+	slices.SortFunc(items, func(a, b T) int {
+		nameA := strings.ToLower(a.GetCleanName())
+		nameB := strings.ToLower(b.GetCleanName())
+		return strings.Compare(nameA, nameB)
+	})
+}
+
+type GenericPack interface {
+	GetCleanName() string
+	GetPath() string
+	GetUUID() string
+}
+
+// Implement the interface for all 4 types (this enables the Generic function to work)
+func (r ResourcePack) GetCleanName() string { return r.CleanName }
+func (b BehaviorPack) GetCleanName() string { return b.CleanName }
+func (a Addon) GetCleanName() string        { return a.CleanName }
+func (w WorldData) GetCleanName() string    { return w.CleanName }
+
+// Also implement GetPath for ResourcePack and BehaviorPack
+func (r ResourcePack) GetPath() string { return r.Path }
+func (b BehaviorPack) GetPath() string { return b.Path }
+func (r ResourcePack) GetUUID() string { return r.UUID }
+func (b BehaviorPack) GetUUID() string { return b.UUID }
+
+type WarningType string
+
+const (
+	WarningConflict      WarningType = "DEPENDENCY_CONFLICT" // Multiple BPs want same RP
+	WarningMismatch      WarningType = "NAME_MISMATCH"       // UUID match but names differ
+	WarningDuplicateUUID WarningType = "DUPLICATE_UUID"      // Two packs have the same UUID
+)
+
+type PackWarning struct {
+	Type    WarningType
+	Message string
+
+	// For Dependency Conflicts (BP -> RP)
+	ResourcePack ResourcePack
+	InvolvedBPs  []BehaviorPack
+	WinnerBP     BehaviorPack
+
+	// For Duplicate UUIDs (RP vs RP or BP vs BP)
+	ConflictingRPs []ResourcePack
+	ConflictingBPs []BehaviorPack
+}
 
 func NewApp() *App {
 	return &App{}
@@ -65,7 +140,7 @@ func (a *App) SelfVersion() string {
 	data, _ := base64.StdEncoding.DecodeString(ico)
 	dir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
 	path := filepath.Join(dir, "icon.png")
-	_ = os.WriteFile(path, data, 0644)
+	os.WriteFile(path, data, 0644)
 	return "3.0.0"
 }
 func (a *App) GetUserSetting() string {
@@ -73,12 +148,57 @@ func (a *App) GetUserSetting() string {
 	path := filepath.Join(dir, "userSettings.json")
 
 	if _, err := os.Stat(path); err != nil {
-		content := `{"mode": "development","exportLocation": "desktop", "theme": "default", "format": "mcaddon"}`
-		_ = os.WriteFile(path, []byte(content), 0644)
+		content := `{"exportLocation": "desktop", "theme": "default", "format": "mcaddon"}`
+		os.WriteFile(path, []byte(content), 0644)
 		return content
 	}
 	content, _ := os.ReadFile(path)
 	return string(content)
+}
+func (a *App) UninstallApp() string {
+	dir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
+	path := filepath.Join(dir, "uninstall.exe")
+
+	// 1. Check if file exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		fmt.Println("Uninstaller not found")
+		return "Something went wrong! Uninstaller not found"
+	}
+
+	// 2. Prepare Windows API call
+	// We use ShellExecute instead of exec.Command to support "runas" (Admin prompt)
+	shell32 := syscall.NewLazyDLL("shell32.dll")
+	procShellExecute := shell32.NewProc("ShellExecuteW")
+
+	// Convert Go strings to Windows UTF-16 pointers
+	ptrOperation, _ := syscall.UTF16PtrFromString("runas") // Triggers UAC
+	ptrFile, _ := syscall.UTF16PtrFromString(path)
+	ptrDir, _ := syscall.UTF16PtrFromString(dir)
+
+	// Window visibility: 1 = SW_SHOWNORMAL, 0 = SW_HIDE
+	var showCmd int32 = 1
+
+	// 3. Call the API
+	// ShellExecuteW(hwnd, lpOperation, lpFile, lpParameters, lpDirectory, nShowCmd)
+	ret, _, _ := procShellExecute.Call(
+		0, // hwnd (Parent window, 0 for none)
+		uintptr(unsafe.Pointer(ptrOperation)),
+		uintptr(unsafe.Pointer(ptrFile)),
+		0, // Parameters (0 or nil if none)
+		uintptr(unsafe.Pointer(ptrDir)),
+		uintptr(showCmd),
+	)
+
+	// ShellExecute returns a value > 32 on success
+	if ret <= 32 {
+		fmt.Printf("Failed to launch uninstaller. Error code: %d\n", ret)
+		return fmt.Sprintf("Something went wrong! Failed to launch uninstaller: %v", ret)
+	}
+
+	// 4. CRITICAL: Exit immediately
+	// You must close this app so the uninstaller can delete the .exe file
+	os.Exit(0)
+	return ""
 }
 func (a *App) SaveUserSetting(data string) {
 	err := os.WriteFile(filepath.Join(filepath.Dir(os.Args[0]), "userSettings.json"), []byte(data), 0644)
@@ -104,78 +224,219 @@ func (a *App) SaveUserSetting(data string) {
 		return directoryPath, nil
 	}
 */
-func (a *App) OpenDirectoryDialog() (string, error) {
+func (a *App) OpenDirectoryDialogCall() (string, error) {
 	directoryPath, err := runtime.OpenDirectoryDialog(
 		a.ctx,
 		runtime.OpenDialogOptions{
-			Title: "Select Export Directory",
+			Title: "Select Folder", // Give it a title
 		},
 	)
+
+	// Handle the cancellation error specifically if needed
 	if err != nil {
-		return "", fmt.Errorf("failed opening dialog - %s", err.Error())
+		return "", err
 	}
-	fmt.Println("Selected directory:", directoryPath)
 	return directoryPath, nil
-}
-func renameFile(oldPath string, newPath string) {
-	err := os.Rename(oldPath, newPath)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
 }
 func (a *App) GetData() string {
 	//C:\Users\An\AppData\Roaming\Minecraft Bedrock\Users\Shared\games\com.mojang\development_resource_packs
-	var gamePath string = "C:\\Users\\" + os.Getenv("USERNAME") + "\\AppData\\Roaming\\Minecraft Bedrock\\Users\\Shared\\games\\com.mojang"
-	var resourcePacksPath string = gamePath + "resource_packs"
-	var behaviorPacksPath string = gamePath + "behavior_packs"
-	var developmentResourcePacksPath string = gamePath + "\\development_resource_packs"
-	var developmentBehaviorPacksPath string = gamePath + "\\development_behavior_packs"
-
-	listResourcePacks := ListResoucePack(resourcePacksPath)
-	listResourcePacks = append(listResourcePacks, ListResoucePack(developmentResourcePacksPath)...)
-
-	listBehaviorPacks := ListBehaviorPack(behaviorPacksPath)
-	listBehaviorPacks = append(listBehaviorPacks, ListBehaviorPack(developmentBehaviorPacksPath)...)
-
-	exclusiveResourcePack, addonPack, exclusiveBehaviorPack := sortPacks(listResourcePacks, listBehaviorPacks)
-
-	data := []any{exclusiveResourcePack, addonPack, exclusiveBehaviorPack}
-	jsonData, _ := json.Marshal(data)
+	var gamePath string = "C:\\Users\\" + os.Getenv("USERNAME") + "\\AppData\\Roaming\\Minecraft Bedrock\\Users\\Shared\\games\\com.mojang\\"
+	listOfResourcePacks := ListResourcePack(gamePath + "resource_packs")
+	listOfResourcePacks = append(listOfResourcePacks, ListResourcePack(gamePath+"development_resource_packs")...)
+	listOfBehaviorPacks := ListBehaviorPack(gamePath + "behavior_packs")
+	listOfBehaviorPacks = append(listOfBehaviorPacks, ListBehaviorPack(gamePath+"development_behavior_packs")...)
+	worldData := ListWorldData(listOfBehaviorPacks, listOfResourcePacks)
+	// fmt.Println("Total Resource Packs: ", len(listOfResourcePacks))
+	// fmt.Println("Total Behavior Packs: ", len(listOfBehaviorPacks))
+	// fmt.Println("List Resource Packs: ")
+	// index := 1
+	// for _, rp := range listOfResourcePacks {
+	// 	fmt.Println(index, " - ", rp.CleanName, " | UUDI: ", rp.UUID, " | Signatures:", rp.IsSignatures)
+	// 	index++
+	// }
+	// fmt.Println("List Behavior Packs: ")
+	// index = 1
+	// for _, rp := range listOfBehaviorPacks {
+	// 	fmt.Println(index, " - ", rp.CleanName, " | UUDI: ", rp.UUID, " | Signatures:", rp.IsSignatures)
+	// 	index++
+	// }
+	exclusiveResourcePack, addonPack, exclusiveBehaviorPack, warning := sortPacks(listOfResourcePacks, listOfBehaviorPacks)
+	// fmt.Println("List of Exclusive Resource Packs: ")
+	// for _, rp := range exclusiveResourcePack {
+	// 	fmt.Println(" - ", rp.CleanName, " | UUDI: ", rp.UUID, " | Signatures:", rp.IsSignatures)
+	// }
+	// fmt.Println("List of Addon Packs: ")
+	// for _, ap := range addonPack {
+	// 	fmt.Println(" - ", ap.CleanName, " | RP UUDI: ", ap.ResourcePack.UUID, " | BP UUDI:", ap.BehaviorPack.UUID)
+	// }
+	// fmt.Println("List of Exclusive Behavior Packs: ")
+	// for _, bp := range exclusiveBehaviorPack {
+	// 	fmt.Println(" - ", bp.CleanName, " | UUDI: ", bp.UUID, " | Signatures:", bp.IsSignatures)
+	// }
+	// for _, warn := range warning {
+	// 	fmt.Println(warn.Type, ": ", warn.Message)
+	// }
+	SortByCleanName(exclusiveResourcePack)
+	SortByCleanName(addonPack)
+	SortByCleanName(exclusiveBehaviorPack)
+	SortByCleanName(worldData)
+	jsonData, _ := json.Marshal([]interface{}{
+		exclusiveResourcePack,
+		addonPack,
+		exclusiveBehaviorPack,
+		worldData,
+		warning,
+	})
 	return string(jsonData)
 }
-func (a *App) UpdateScriptVersion(behaviorPath string, oldVersion string) {
-	content, _ := os.ReadFile(behaviorPath + "\\manifest.json")
+func (a *App) UpdateScriptVersion(behaviorPathEncode string, oldVersion string) string {
+	fmt.Print("behaviorPathEncode: ", behaviorPathEncode)
+	behaviorPathDecoded, err := base64.StdEncoding.DecodeString(behaviorPathEncode)
+	if err != nil {
+		log.Println("Error decoding behavior pack path:", err)
+		return "Error: Failed to decode behavior pack path"
+	}
+	var paths []string
+	err = json.Unmarshal(behaviorPathDecoded, &paths)
+	if err != nil {
+		return "Error: Failed to parse pack's path"
+	}
+	var path string
+	switch len(paths) {
+	case 0:
+		return "Error: Something went wrong"
+	case 1: // Behavior Pack
+		path = paths[0]
+	case 2: // Addon Pack
+		path = paths[1]
+	}
+	path = path + "\\manifest.json"
+	content, err := os.ReadFile(path)
+	if err != nil {
+		log.Println("Error reading manifest.json:", err)
+		return "Error: Failed to read manifest.json"
+	}
 	newContent := strings.ReplaceAll(string(content), oldVersion, "beta")
-	_ = os.WriteFile(behaviorPath+"\\manifest.json", []byte(newContent), 0644)
+	_ = os.WriteFile(path, []byte(newContent), 0644)
+	return "Success: Updated Script API version"
 }
-func (a *App) CompilePack(packData string) {
+func (a *App) CompilePack(packData string) string {
+	log.Println("!!!!Compiling Pack with Data:", packData)
 	data := &PackData{}
 	if err := json.Unmarshal([]byte(packData), data); err != nil {
 		fmt.Println("Error parsing JSON data:", err)
 	}
-	fmt.Println("Parsed Pack Data:", data.PackType)
-	var suffixPackType string = " Resource Pack." //behaviorPack addOnPack resourcePack
-	if data.PackType == "addOnPack" {
+	log.Println("Parsed Pack Data:", data.PackType)
+	var suffixPackType string // behaviorPack addOnPack resourcePack
+	format := data.Format
+	switch data.PackType {
+	case "addOnPack":
 		suffixPackType = " Addon."
-	} else if data.PackType == "behaviorPack" {
+	case "behaviorPack":
 		suffixPackType = " Behavior Pack."
+		format = "mcpack"
+	case "resourcePack":
+		suffixPackType = " Resource Pack."
+		format = "mcpack"
+	case "world":
+		suffixPackType = " World."
+		format = "mcworld"
 	}
-	var exportPath string = "C:\\Users\\" + os.Getenv("USERNAME") + "\\Desktop\\" + data.CleanName + suffixPackType + data.Format
+	var exportPath string = "C:\\Users\\" + os.Getenv("USERNAME") + "\\Desktop\\" + cleanName(data.CleanName) + suffixPackType + format
 	if data.ExportPath != "desktop" {
-		exportPath = data.ExportPath + "\\" + data.CleanName + suffixPackType + data.Format
+		exportPath = data.ExportPath + "\\" + data.CleanName + suffixPackType + format
 	}
-	fmt.Println("Export Path:", exportPath)
-	paths := []string{data.ResoucePackPath, data.BehaviorPackPath}
-	if err := ZipFolders(paths, exportPath); err != nil {
-		panic(err)
+	log.Println("Export Path:", exportPath)
+	decodedPackPathArrayString, err := base64.StdEncoding.DecodeString(data.PackPath)
+	if err != nil {
+		return "Error: Failed to decoded pack's path"
 	}
+	log.Println("!!!Decoded Pack Path Array String:", string(decodedPackPathArrayString))
+	var paths []string
+	// decodedPackPathArrayString is a string of JSON array
+	// We need to unmarshal it and assign to paths
+	err = json.Unmarshal(decodedPackPathArrayString, &paths)
+	if err != nil {
+		return "Error: Failed to parse pack's path array"
+	}
+	if len(paths) == 0 {
+		return "Error: No valid pack path found"
+	}
+	assets := []ZipAsset{}
+	switch data.PackType {
+	case "addOnPack":
+		assets = append(assets, ZipAsset{
+			SourcePath: paths[0],
+			ZipPath:    filepath.Base(paths[0]),
+		})
+
+		assets = append(assets, ZipAsset{
+			SourcePath: paths[1],
+			ZipPath:    filepath.Base(paths[1]),
+		})
+	case "world":
+		assets = append(assets, ZipAsset{
+			SourcePath: paths[0],
+			ZipPath:    "",
+		})
+		// Handle behaviorPack and resourcePack if available
+		encodedRequiredRP := data.RequiredRP
+		fmt.Println("!!!!encodedRequiredRP: ", encodedRequiredRP)
+		encodedRequiredBP := data.RequiredBP
+		fmt.Println("!!!!encodedRequiredBP: ", encodedRequiredBP)
+		// Decode base64
+		decodedRP, err := base64.StdEncoding.DecodeString(encodedRequiredRP)
+		if err == nil { // No error. Success
+			var requiredRPs []RequiredPacks
+			if err := json.Unmarshal(decodedRP, &requiredRPs); err == nil {
+				for _, rp := range requiredRPs {
+					assets = append(assets, ZipAsset{
+						SourcePath: rp.Path,
+						ZipPath:    filepath.Join("resource_packs", filepath.Base(rp.Path)),
+					})
+				}
+			}
+		}
+		decodedBP, err := base64.StdEncoding.DecodeString(encodedRequiredBP)
+		if err == nil {
+			var requiredBPs []RequiredPacks
+			if err := json.Unmarshal(decodedBP, &requiredBPs); err == nil {
+				for _, bp := range requiredBPs {
+					assets = append(assets, ZipAsset{
+						SourcePath: bp.Path,
+						ZipPath:    filepath.Join("behavior_packs", filepath.Base(bp.Path)),
+					})
+				}
+			}
+		}
+	default: // behaviorPack or resourcePack
+		assets = append(assets, ZipAsset{
+			SourcePath: paths[0],
+			ZipPath:    "",
+		})
+	}
+	if err := ZipAssets(assets, exportPath); err != nil {
+		return "Error: Failed to create file"
+	}
+	return fmt.Sprintf("Success: Export pack %s", data.CleanName)
 }
 func (a *App) Notify(title string, icon string) {
+	// concat icon path + "\\
+	var iconPath string
+	iconPath = filepath.Join(icon, "pack_icon.png")
+	// Check if iconPath exists
+	if _, err := os.Stat(iconPath); os.IsNotExist(err) {
+		// Its not exist, use other name
+		iconPath = filepath.Join(icon, "world_icon.jpeg")
+		if _, err := os.Stat(iconPath); os.IsNotExist(err) {
+			// Its not exist, use default icon
+			iconPath = filepath.Join(filepath.Dir(os.Args[0]), "icon.png")
+		}
+	}
 	notification := toast.Notification{
 		AppID: "Add-On Compiler",
 		Title: title,
-		Icon:  icon,
+		Icon:  iconPath,
 	}
 	notification.Push()
 }
@@ -187,16 +448,107 @@ func (a *App) NotifyText(title string) {
 		Title: title,
 		Icon:  path,
 	}
-	notification.Push()
-}
-func (a *App) GetImage(path string) string {
-	imagePath := path + "//pack_icon.png"
-	file, err := os.ReadFile(imagePath)
+	err := notification.Push()
 	if err != nil {
-		return "data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="
+		log.Println("Error showing notification:", err)
 	}
-	encodedImage := base64.StdEncoding.EncodeToString(file)
-	return "data:image/png;base64," + encodedImage
+}
+func addFileToZip(zipWriter *zip.Writer, sourcePath, zipPath string) error {
+	// 1. Open the source file
+	fileToZip, err := os.Open(sourcePath)
+	if err != nil {
+		return err
+	}
+	defer fileToZip.Close()
+
+	// 2. Clean the path for Zip specification (Always forward slashes)
+	zipPath = filepath.ToSlash(zipPath)
+
+	// 3. Create the header manually so we can set Compression
+	info, err := fileToZip.Stat()
+	if err != nil {
+		return err
+	}
+
+	header, err := zip.FileInfoHeader(info)
+	if err != nil {
+		return err
+	}
+
+	// IMPORTANT: Set the name to our custom path, not the original filename
+	header.Name = zipPath
+	// Enable Compression (Deflate is the standard zip compression)
+	header.Method = zip.Deflate
+
+	// 4. Create the writer for this specific file
+	writer, err := zipWriter.CreateHeader(header)
+	if err != nil {
+		return err
+	}
+
+	// 5. Copy content
+	_, err = io.Copy(writer, fileToZip)
+	return err
+}
+func ZipAssets(assets []ZipAsset, exportPath string) error {
+	// 1. Create the output file
+	zipFile, err := os.Create(exportPath)
+	if err != nil {
+		return err
+	}
+	defer zipFile.Close()
+
+	// 2. Initialize the Zip Writer
+	zipWriter := zip.NewWriter(zipFile)
+	defer zipWriter.Close()
+
+	// 3. Process every asset in the list
+	for _, asset := range assets {
+		// Stat the file to ensure it exists and check if it's a folder
+		info, err := os.Stat(asset.SourcePath)
+		if err != nil {
+			return fmt.Errorf("could not find source %s: %w", asset.SourcePath, err)
+		}
+
+		// If it's a single file, just add it
+		if !info.IsDir() {
+			if err := addFileToZip(zipWriter, asset.SourcePath, asset.ZipPath); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// If it's a directory, walk it recursively
+		// We use the 'asset.SourcePath' as the base to calculate relative paths
+		baseDir := asset.SourcePath
+		err = filepath.Walk(asset.SourcePath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				return nil // We don't need to create explicit directory entries, files create them implicitly
+			}
+
+			// relativePath becomes the path *inside* the source folder
+			// e.g. if walking "myFolder", and we find "myFolder/sub/file.txt", relative is "sub/file.txt"
+			relativePath, err := filepath.Rel(baseDir, path)
+			if err != nil {
+				return err
+			}
+
+			// Join the relative path with the user's desired ZipPath
+			// e.g. User wants "custom/location/" + "sub/file.txt"
+			finalZipPath := filepath.Join(asset.ZipPath, relativePath)
+
+			return addFileToZip(zipWriter, path, finalZipPath)
+		})
+
+		if err != nil {
+			return fmt.Errorf("error walking directory %s: %w", asset.SourcePath, err)
+		}
+	}
+
+	return nil
 }
 func ZipFolders(folderPaths []string, exportPath string) error {
 	zipFile, err := os.Create(exportPath)
@@ -265,147 +617,443 @@ func fileExists(filename string) bool {
 	}
 	return !info.IsDir()
 }
-func ListResoucePack(dir string) []ResourcePack {
-	dirHandle, _ := os.Open(dir)
-	defer dirHandle.Close()
-	entries, _ := dirHandle.Readdir(0)
-	var resourcePackList []ResourcePack
+
+// resolvePackName handles the logic of checking "pack.name" vs the .lang file
+func resolvePackName(packPath, entryName, manifestName string) string {
+	if manifestName != "pack.name" {
+		return entryName // Or manifestName if you prefer the raw name
+	}
+
+	// Use filepath.Join for cross-platform safety
+	langFilePath := filepath.Join(packPath, "texts", "en_US.lang")
+	langFile, err := os.Open(langFilePath)
+	if err != nil {
+		return entryName // Fallback to directory name if lang file fails
+	}
+	defer langFile.Close()
+
+	scanner := bufio.NewScanner(langFile)
+	const targetKey = "pack.name"
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		// TrimSpace is safer to handle accidental leading spaces
+		if strings.HasPrefix(strings.TrimSpace(line), targetKey+"=") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				return strings.TrimSpace(parts[1])
+			}
+		}
+	}
+	return entryName // Fallback
+}
+
+// scanPacks iterates a directory and processes valid Minecraft packs
+func scanPacks(rootDir string, processor func(path string, name string, manifest Manifest, icon string)) {
+	entries, err := os.ReadDir(rootDir) // os.ReadDir is newer and faster than os.Open + Readdir
+	if err != nil {
+		log.Println("ERROR: Failed to read directory:", rootDir, err)
+		return
+	}
+
 	for _, entry := range entries {
-		if entry.IsDir() {
-			file, err := os.Open(dir + "\\" + entry.Name() + "\\" + "manifest.json")
+		if !entry.IsDir() {
+			continue
+		}
+
+		packPath := filepath.Join(rootDir, entry.Name())
+		//log.Println("Scanning: ", packPath)
+		manifestPath := filepath.Join(packPath, "manifest.json")
+
+		file, err := os.Open(manifestPath)
+		if err != nil {
+			continue // Not a pack or permission denied
+		}
+
+		var manifest Manifest
+		err = json.NewDecoder(file).Decode(&manifest)
+		file.Close() // Close immediately!
+
+		if err != nil {
+			log.Println("WARNING: Invalid JSON in:", packPath)
+			continue
+		}
+
+		// Resolve the name using our helper
+		cleanName := resolvePackName(packPath, entry.Name(), manifest.Header.Name)
+		icon := filepath.Join(packPath, "pack_icon.png")
+
+		// Hand off the data to the specific logic
+		processor(packPath, cleanName, manifest, icon)
+	}
+}
+func getDependency[T GenericPack](filePath string, list []T) string {
+	var returnData []RequiredPacks
+	file, err := os.Open(filePath)
+	if err != nil { // file doesn't exist
+		return "W10=" // Return empty list [] on error Note that base64 of [] is W10=
+	}
+	defer file.Close()
+	type PackManifest struct {
+		PackID string `json:"pack_id"`
+	}
+	var entries []PackManifest // Using the struct from Tip #2
+	if err := json.NewDecoder(file).Decode(&entries); err == nil {
+		for _, entry := range entries {
+			// The entry is UUID, use it as lookup by listOfBehaviorPacks and listOfResourcePacks
+			for _, pack := range list {
+				if pack.GetUUID() == entry.PackID {
+					returnData = append(returnData, RequiredPacks{
+						CleanName: pack.GetCleanName(),
+						Path:      pack.GetPath(),
+						Icon:      pack.GetPath() + "\\pack_icon.png",
+					})
+					continue
+				}
+			}
+		}
+	}
+	jsonData, err := json.Marshal(returnData)
+	if err != nil {
+		return "W10=" // Return empty list [] on error Note that base64 of [] is W10=
+	}
+	if string(jsonData) == "null" { // JSON marshal can return null on empty slice which is invalid for our case
+		return "W10=" // Return empty list [] on error Note that base64 of [] is W10=
+	}
+	// convert jsonData to base64
+	encoded := base64.StdEncoding.EncodeToString(jsonData)
+	return encoded
+}
+func ListWorldData(listOfBehaviorPacks []BehaviorPack, listOfResourcePacks []ResourcePack) []WorldData {
+	//C:\Users\An\AppData\Roaming\Minecraft Bedrock\Users\63352952236107600\games\com.mojang\minecraftWorlds\R3MByq0SLb0=
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		// handle error
+	}
+	// filepath.Join handles slashes automatically
+	worldsDir := filepath.Join(homeDir, "AppData", "Roaming", "Minecraft Bedrock", "Users")
+	// Here's we first encounter the first problem
+	// Users have different numeric IDs based on Xbox Live accounts
+	// We need to handle multiple user folders assume that each valid user folder name is numeric only and ignore others
+	// Then we scan each user's minecraftWorlds folder then normalize the data
+	// Finally we combine all worlds into a single list
+	var allWorlds []WorldData
+	userEntries, err := os.ReadDir(worldsDir)
+	if err != nil {
+		log.Println("ERROR: Failed to read worlds root directory:", worldsDir, err)
+		return allWorlds
+	}
+	for _, userEntry := range userEntries {
+		if !userEntry.IsDir() {
+			log.Println("Skipping non-numeric user folder:", userEntry.Name())
+			continue
+		}
+		// Check if the folder name is numeric only
+		if _, err := strconv.ParseInt(userEntry.Name(), 10, 64); err != nil {
+			log.Println("Skipping non-numeric user folder:", userEntry.Name())
+			continue
+		}
+		userWorldsDir := filepath.Join(worldsDir, userEntry.Name(), "games", "com.mojang", "minecraftWorlds")
+		worldEntries, err := os.ReadDir(userWorldsDir)
+		if err != nil {
+			log.Println("ERROR: Failed to read user worlds directory:", userWorldsDir, err)
+			continue
+		}
+		for _, worldEntry := range worldEntries {
+			if !worldEntry.IsDir() {
+				log.Println("Skipping non-directory world entry:", worldEntry.Name())
+				continue
+			}
+			worldPath := filepath.Join(userWorldsDir, worldEntry.Name())
+			// World don't have manifest.json, so we read levelname.txt for the name
+			// And icon is world_icon.jpeg
+			// For resource and behavior packs, we read from world_resource_packs.json and world_behavior_packs.json respectively
+			levelNamePath := filepath.Join(worldPath, "levelname.txt")
+			levelNameBytes, err := os.ReadFile(levelNamePath)
+			var worldName string
 			if err != nil {
-				os.Exit(1)
+				log.Println("WARNING: Failed to read levelname.txt in:", worldPath, err)
+				worldName = worldEntry.Name() // Fallback to folder name
+			} else {
+				worldName = strings.TrimSpace(string(levelNameBytes))
 			}
-			defer file.Close()
-			var manifest Manifest
-			json.NewDecoder(file).Decode(&manifest)
-			packName := entry.Name()
-			if manifest.Header.Name == "pack.name" {
-				// pack name is hidden in lang file
-				// get lang file to get the name
-				langFile, err := os.Open(dir + "\\" + entry.Name() + "\\" + "texts" + "\\" + "en_US.lang")
-				if err != nil {
-					const targetKey = "pack.name"
-					// Use bufio.Scanner to read the file line by line
-					scanner := bufio.NewScanner(langFile)
-					for scanner.Scan() {
-						line := scanner.Text()
-						if strings.HasPrefix(line, targetKey+"=") {
-							parts := strings.SplitN(line, "=", 2)
-							if len(parts) == 2 {
-								packName = parts[1]
-								break
-							}
-						}
-					}
-				}
-				defer langFile.Close()
-			}
-			resourcePackList = append(resourcePackList, ResourcePack{CleanName: packName, UUID: manifest.Header.UUID, Path: dir + "\\" + entry.Name(), IsSignatures: fileExists(dir + "\\" + entry.Name() + "\\signatures.json")})
+			icon := filepath.Join(worldPath, "world_icon.jpeg")
+			resourcePackUUIDs := getDependency(filepath.Join(worldPath, "world_resource_packs.json"), listOfResourcePacks)
+			behaviorPackUUIDs := getDependency(filepath.Join(worldPath, "world_behavior_packs.json"), listOfBehaviorPacks)
+
+			allWorlds = append(allWorlds, WorldData{
+				CleanName:  worldName,
+				Path:       worldPath,
+				Icon:       icon,
+				RequiredRP: resourcePackUUIDs,
+				RequiredBP: behaviorPackUUIDs,
+			})
 		}
 	}
-	return resourcePackList
+	return allWorlds
 }
+func ListResourcePack(dir string) []ResourcePack {
+	var list []ResourcePack
 
+	scanPacks(dir, func(path string, name string, manifest Manifest, icon string) {
+		// Specific Logic for Resource Packs
+		list = append(list, ResourcePack{
+			CleanName:    name,
+			Icon:         icon,
+			UUID:         manifest.Header.UUID,
+			Path:         path,
+			IsSignatures: fileExists(filepath.Join(path, "signatures.json")),
+		})
+	})
+	return list
+}
 func ListBehaviorPack(dir string) []BehaviorPack {
-	dirHandle, _ := os.Open(dir)
-	defer dirHandle.Close()
-	entries, _ := dirHandle.Readdir(0)
-	var behaviorPackList []BehaviorPack
-	for _, entry := range entries {
-		if entry.IsDir() {
-			file, _ := os.Open(dir + "\\" + entry.Name() + "\\" + "manifest.json")
-			defer file.Close()
-			var manifest Manifest
-			json.NewDecoder(file).Decode(&manifest)
-			packName := entry.Name()
-			if manifest.Header.Name == "pack.name" {
-				// pack name is hidden in lang file
-				// get lang file to get the name
-				langFile, err := os.Open(dir + "\\" + entry.Name() + "\\" + "texts" + "\\" + "en_US.lang")
-				if err != nil {
-					const targetKey = "pack.name"
-					// Use bufio.Scanner to read the file line by line
-					scanner := bufio.NewScanner(langFile)
-					for scanner.Scan() {
-						line := scanner.Text()
-						if strings.HasPrefix(line, targetKey+"=") {
-							parts := strings.SplitN(line, "=", 2)
-							if len(parts) == 2 {
-								packName = parts[1]
-								break
-							}
-						}
-					}
-				}
-				defer langFile.Close()
+	var list []BehaviorPack
+
+	scanPacks(dir, func(path string, name string, manifest Manifest, icon string) {
+		// Specific Logic for Behavior Packs
+		var serverVersion string = "null-script"
+		var dependenciesUUID []string
+
+		for _, dep := range manifest.Dependencies {
+			// Extract UUIDs
+			if uuid, ok := dep["uuid"].(string); ok {
+				dependenciesUUID = append(dependenciesUUID, uuid)
 			}
-			var minecraftServerVersion string
-			var dependenciesUUID []string
-			for _, dep := range manifest.Dependencies {
-				moduleName, ok := dep["module_name"].(string)
-				if ok {
-					if moduleName == "@minecraft/server" {
-						version, ok := dep["version"].(string)
-						if ok {
-							minecraftServerVersion = version
-						}
-					}
-				}
-				depedencyUUID, ok := dep["uuid"].(string)
-				if ok {
-					dependenciesUUID = append(dependenciesUUID, depedencyUUID)
+			// Check for Script API version
+			if module, ok := dep["module_name"].(string); ok && module == "@minecraft/server" {
+				if ver, ok := dep["version"].(string); ok {
+					serverVersion = ver
 				}
 			}
-			if minecraftServerVersion == "" {
-				minecraftServerVersion = "null-script"
+		}
+
+		list = append(list, BehaviorPack{
+			CleanName:        name,
+			Icon:             icon,
+			UUID:             manifest.Header.UUID,
+			DependenciesUUID: dependenciesUUID,
+			ScriptState:      serverVersion,
+			Path:             path,
+			IsSignatures:     fileExists(filepath.Join(path, "signatures.json")),
+		})
+	})
+	return list
+}
+func calculateNameSimilarity(name1, name2 string) int {
+	tokens1 := tokenize(name1)
+	tokens2 := tokenize(name2)
+
+	score := 0
+	for _, t1 := range tokens1 {
+		if len(t1) < 3 {
+			continue
+		}
+		for _, t2 := range tokens2 {
+			if len(t2) < 3 {
+				continue
 			}
-			behaviorPackList = append(behaviorPackList, BehaviorPack{CleanName: packName, DependenciesUUID: dependenciesUUID, ScriptState: minecraftServerVersion, Path: dir + "\\" + entry.Name(), IsSignatures: fileExists(dir + "\\" + entry.Name() + "\\signatures.json")})
+			if t1 == t2 {
+				score++
+			}
 		}
 	}
-	return behaviorPackList
+	return score
 }
 
-func sortPacks(resourcePack []ResourcePack, behaviorPack []BehaviorPack) ([]ResourcePack, []Addon, []BehaviorPack) {
-	// Create a map for O(1) lookup of resource packs by UUID
-	rpMap := make(map[string]ResourcePack, len(resourcePack))
-	for _, rp := range resourcePack {
-		rpMap[rp.UUID] = rp
+func tokenize(s string) []string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, "-", " ")
+	s = strings.ReplaceAll(s, "_", " ")
+	// You can add more cleanup here (e.g., remove "v1", "mcpack", etc.)
+	return strings.Fields(s)
+}
+func sanitizeRPs(allRPs []ResourcePack) ([]ResourcePack, []PackWarning) {
+	var valid []ResourcePack
+	var warnings []PackWarning
+
+	// Map to track UUIDs: UUID -> Slice of RPs found with that UUID
+	occurrenceMap := make(map[string][]ResourcePack)
+
+	// Group by UUID
+	for _, rp := range allRPs {
+		occurrenceMap[rp.UUID] = append(occurrenceMap[rp.UUID], rp)
 	}
+
+	for uuid, group := range occurrenceMap {
+		if len(group) == 1 {
+			valid = append(valid, group[0])
+		} else {
+			// Found duplicates!
+			// 1. Keep the first one as "valid" (arbitrary choice to prevent crash)
+			valid = append(valid, group[0])
+
+			// 2. Create Warning
+			names := []string{}
+			for _, rp := range group {
+				names = append(names, rp.CleanName)
+			}
+
+			warnings = append(warnings, PackWarning{
+				Type:           WarningDuplicateUUID,
+				Message:        fmt.Sprintf("Duplicate Resource Pack UUID (%s) found in: %s. Using first one.", uuid, strings.Join(names, ", ")),
+				ConflictingRPs: group,
+			})
+		}
+	}
+	return valid, warnings
+}
+
+func sanitizeBPs(allBPs []BehaviorPack) ([]BehaviorPack, []PackWarning) {
+	var valid []BehaviorPack
+	var warnings []PackWarning
+
+	// Map: UUID -> List of packs with that UUID
+	occurrenceMap := make(map[string][]BehaviorPack)
+
+	for _, bp := range allBPs {
+		occurrenceMap[bp.UUID] = append(occurrenceMap[bp.UUID], bp)
+	}
+
+	for uuid, group := range occurrenceMap {
+		if len(group) == 1 {
+			// Unique UUID, add to valid list
+			valid = append(valid, group[0])
+		} else {
+			// Duplicate UUIDs found
+
+			// 1. Keep the first one found (arbitrary selection)
+			valid = append(valid, group[0])
+
+			// 2. Collect names for logging/warning
+			names := []string{}
+			for _, bp := range group {
+				names = append(names, bp.CleanName)
+			}
+
+			// --- LOGGING START ---
+			// This prints the specific UUID and the names of the packs fighting for it
+			log.Printf("⚠️ [DUPLICATE DETECTED] UUID: %s\n\t→ Found in %d packs: [%s]",
+				uuid, len(group), strings.Join(names, ", "))
+			// --- LOGGING END ---
+
+			// 3. Add to Warning list
+			warnings = append(warnings, PackWarning{
+				Type:           WarningDuplicateUUID,
+				Message:        fmt.Sprintf("Duplicate Behavior Pack UUID (%s) found in: %s. Using first one.", uuid, strings.Join(names, ", ")),
+				ConflictingBPs: group,
+			})
+		}
+	}
+	return valid, warnings
+}
+func sortPacks(resourcePacks []ResourcePack, behaviorPacks []BehaviorPack) ([]ResourcePack, []Addon, []BehaviorPack, []PackWarning) {
+	var warnings []PackWarning
+
+	// --- STEP 0: Sanitize & Check for Duplicates ---
+	// We clean the lists first so the rest of the logic doesn't bug out
+	validRPs, rpWarnings := sanitizeRPs(resourcePacks)
+	validBPs, bpWarnings := sanitizeBPs(behaviorPacks)
+
+	warnings = append(warnings, rpWarnings...)
+	warnings = append(warnings, bpWarnings...)
+
+	// --- STEP 1: Indexing (Using Valid RPs) ---
+	rpMap := make(map[string]ResourcePack, len(validRPs))
+	rpOrder := make([]string, 0, len(validRPs))
+	for _, rp := range validRPs {
+		rpMap[rp.UUID] = rp
+		rpOrder = append(rpOrder, rp.UUID)
+	}
+
+	// --- STEP 2: Bidding ---
+	claims := make(map[string][]BehaviorPack)
+	orphanBPCandidates := make(map[string]BehaviorPack)
+
+	for _, bp := range validBPs {
+		foundDependency := false
+		for _, depUUID := range bp.DependenciesUUID {
+			if _, exists := rpMap[depUUID]; exists {
+				claims[depUUID] = append(claims[depUUID], bp)
+				foundDependency = true
+				break
+			}
+		}
+		if !foundDependency {
+			orphanBPCandidates[bp.UUID] = bp
+		}
+	}
+
+	// --- STEP 3: Resolution ---
+	var addonPacksLoop []Addon
 	usedRP := make(map[string]bool)
 	usedBP := make(map[string]bool)
 
-	var addonPack []Addon
-	for _, bp := range behaviorPack {
-		matchedRP := []ResourcePack{}
-		for _, depUUID := range bp.DependenciesUUID {
-			if rp, exists := rpMap[depUUID]; exists {
-				matchedRP = append(matchedRP, rp)
-				usedRP[depUUID] = true
+	for rpUUID, bidders := range claims {
+		rp := rpMap[rpUUID]
+		var winnerBP BehaviorPack
+		winnerScore := -1
+
+		for _, bp := range bidders {
+			score := calculateNameSimilarity(bp.CleanName, rp.CleanName)
+			if score > winnerScore {
+				winnerScore = score
+				winnerBP = bp
 			}
 		}
-		if len(matchedRP) == 1 {
-			addonPack = append(addonPack, Addon{
-				CleanName:    cleanName(bp.CleanName),
-				ResourcePack: matchedRP[0],
-				BehaviorPack: bp,
+
+		// Dependency Warnings
+		if len(bidders) > 1 {
+			bpNames := []string{}
+			for _, b := range bidders {
+				bpNames = append(bpNames, b.CleanName)
+			}
+			warnings = append(warnings, PackWarning{
+				Type:         WarningConflict,
+				Message:      fmt.Sprintf("Multiple BPs (%s) claimed RP '%s'. Winner: '%s'", strings.Join(bpNames, ", "), rp.CleanName, winnerBP.CleanName),
+				ResourcePack: rp,
+				InvolvedBPs:  bidders,
+				WinnerBP:     winnerBP,
 			})
-			usedBP[bp.UUID] = true
+		} else if winnerScore == 0 {
+			warnings = append(warnings, PackWarning{
+				Type:         WarningMismatch,
+				Message:      fmt.Sprintf("BP '%s' claimed RP '%s' via UUID, but names look unrelated.", winnerBP.CleanName, rp.CleanName),
+				ResourcePack: rp,
+				InvolvedBPs:  bidders,
+				WinnerBP:     winnerBP,
+			})
+		}
+
+		addonPacksLoop = append(addonPacksLoop, Addon{
+			CleanName:    cleanName(winnerBP.CleanName),
+			ResourcePack: rp,
+			BehaviorPack: winnerBP,
+		})
+		usedRP[rp.UUID] = true
+		usedBP[winnerBP.UUID] = true
+	}
+
+	// --- STEP 4: Final Compilation ---
+	var exclusiveResourcePacksLoop []ResourcePack
+	for _, uuid := range rpOrder {
+		if !usedRP[uuid] {
+			exclusiveResourcePacksLoop = append(exclusiveResourcePacksLoop, rpMap[uuid])
 		}
 	}
-	var exclusiveResourcePack []ResourcePack
-	for _, rp := range resourcePack {
-		if !usedRP[rp.UUID] {
-			exclusiveResourcePack = append(exclusiveResourcePack, rp)
+
+	var exclusiveBehaviorPacksLoop []BehaviorPack
+	for _, bp := range orphanBPCandidates {
+		exclusiveBehaviorPacksLoop = append(exclusiveBehaviorPacksLoop, bp)
+	}
+	for _, bp := range validBPs {
+		_, isOrphan := orphanBPCandidates[bp.UUID]
+		if !usedBP[bp.UUID] && !isOrphan {
+			exclusiveBehaviorPacksLoop = append(exclusiveBehaviorPacksLoop, bp)
 		}
 	}
-	var exclusiveBehaviorPack []BehaviorPack
-	for _, bp := range behaviorPack {
-		if !usedBP[bp.UUID] {
-			exclusiveBehaviorPack = append(exclusiveBehaviorPack, bp)
-		}
-	}
-	return exclusiveResourcePack, addonPack, exclusiveBehaviorPack
+
+	return exclusiveResourcePacksLoop, addonPacksLoop, exclusiveBehaviorPacksLoop, warnings
 }
 
 // Normalize system

@@ -1,21 +1,17 @@
 import {
     Normalize,
     GetData,
-    GetImage,
     Notify,
     NotifyText,
     CompilePack,
-    OpenDirectoryDialog,
+    OpenDirectoryDialogCall,
     UpdateScriptVersion,
     GetUserSetting,
     SaveUserSetting,
     SelfVersion,
+    UninstallApp,
 } from "../wailsjs/go/main/App";
-import {
-    BrowserOpenURL,
-    WindowReload,
-    EventsOn,
-} from "/wailsjs/runtime/runtime";
+import { BrowserOpenURL, EventsOn } from "/wailsjs/runtime/runtime";
 const themes = {
     default: {
         "--background-normalize-panel": "rgba(0, 0, 0, 0.5)",
@@ -107,112 +103,6 @@ const themes = {
     },
 };
 let userSetting;
-let freeTable = true;
-let poi = ["BUTTON", "SELECT", "SPAN", "TD"];
-let contextMenu = document.getElementById("contextMenu");
-function insertSpaceBeforeCapitals(str) {
-    str = str.charAt(0).toUpperCase() + str.slice(1);
-    return str.replace(/([a-z])([A-Z])/g, "$1 $2");
-}
-document.addEventListener("mouseover", (event) => {
-    let target = event.target;
-    if (poi.includes(target.tagName)) {
-        switch (target.tagName) {
-            case "TD":
-                let parent = target.closest("tr");
-                let scriptApiOfPack =
-                    parent.getAttribute("data-current-version") ===
-                    "null-script"
-                        ? ""
-                        : " with BetaAPI version " +
-                          parent.getAttribute("data-current-version");
-                contextMenu.innerHTML = `<strong>${insertSpaceBeforeCapitals(parent.getAttribute("data-pack-type"))}</strong> ${scriptApiOfPack}`;
-                break;
-            case "BUTTON":
-                let textContent = target.textContent;
-                if (textContent === "Update API") {
-                    contextMenu.innerHTML =
-                        "Click to <strong>update</strong> the Script API version for this pack";
-                } else if (textContent === "Compile") {
-                    let parent = target.closest("tr");
-                    let choice =
-                        document.getElementById("saveMode").value === "desktop"
-                            ? "to Desktop"
-                            : "";
-                    contextMenu.innerHTML = `Click to compile <strong>${parent.getAttribute("data-pack-name")}</strong> as ${document.getElementById("saveFormat").value.toUpperCase()} format ${choice}`;
-                } else if (textContent === "Dev Mode") {
-                    contextMenu.innerHTML =
-                        "Click to toggle between <strong>Development</strong> and <strong>Release</strong> mode";
-                }
-                break;
-            case "SELECT":
-                if (target.id === "saveFormat") {
-                    contextMenu.innerHTML = `Change export <strong>format</strong> for compiled packs`;
-                } else if (target.id === "saveMode") {
-                    contextMenu.innerHTML = `Change export <strong>location</strong> for compiled packs`;
-                } else {
-                    contextMenu.innerHTML =
-                        "Change <strong>theme</strong> for the app";
-                }
-                break;
-            case "SPAN":
-                if (target.id === "latestScriptVersion") {
-                    contextMenu.innerHTML =
-                        "Script API version refer to <strong>BetaAPI</strong> experimental features.<br><br> Version: " +
-                        target.textContent;
-                }
-                break;
-        }
-    } else {
-        contextMenu.innerHTML =
-            "Hover above buttons or selection <br> to get more info <br><br> Click to hide this pannel";
-    }
-});
-document.addEventListener("mousemove", (event) => {
-    let offsetTotalWidth = window.screen.width - (event.clientX + 425);
-    let offsetTotalHeight =
-        window.screen.height -
-        (event.clientY +
-            document.getElementById("contextMenu").offsetHeight +
-            75);
-    if (offsetTotalWidth < 0) {
-        offsetTotalWidth = event.clientX - 425;
-    } else {
-        offsetTotalWidth = event.clientX + 5;
-    }
-    if (offsetTotalHeight < 0) {
-        offsetTotalHeight =
-            event.clientY -
-            document.getElementById("contextMenu").offsetHeight -
-            5;
-    } else {
-        offsetTotalHeight = event.clientY + 5;
-    }
-    contextMenu.style.top = `${offsetTotalHeight}px`;
-    contextMenu.style.left = `${offsetTotalWidth}px`;
-});
-let contextMenuVisible = false;
-document.addEventListener("contextmenu", (event) => {
-    event.preventDefault();
-    if (contextMenuVisible) {
-        document.getElementById("contextMenu").style.opacity = "0";
-        contextMenuVisible = false;
-        return;
-    }
-    contextMenuVisible = true;
-    let offsetTotal = window.screen.width - (event.clientX + 425);
-    if (offsetTotal < 0) {
-        offsetTotal = event.clientX - 420;
-    } else {
-        offsetTotal = event.clientX;
-    }
-    contextMenu.style.display = "block";
-    contextMenu.style.opacity = "1";
-    document.addEventListener("click", () => {
-        contextMenuVisible = false;
-        document.getElementById("contextMenu").style.opacity = "0";
-    });
-});
 
 function applyTheme(themeVariables) {
     const root = document.documentElement;
@@ -230,54 +120,35 @@ GetUserSetting().then((data) => {
     document.getElementById("saveMode").value =
         userSetting.exportLocation || "desktop";
     document.getElementById("uiselect").value = userSetting.theme || "default";
-    document.getElementById("modeButton").getAttribute("data-mode") ===
-    userSetting.mode
-        ? null
-        : toggleModeState();
     applyTheme(themes[userSetting.theme]);
 });
-function updateTableName(mode) {
-    let suffix = "";
-    if (mode === "development") {
-        suffix = "Development ";
-    }
-    if (document.getElementById("resourcePack")) {
-        document.getElementById("resourcePack").textContent =
-            suffix + "Resource Packs";
-        document.getElementById("addOnPack").textContent =
-            suffix + "Add-On Packs";
-        document.getElementById("behaviorPack").textContent =
-            suffix + "Behavior Packs";
-    }
-}
+
 function updateUserSetting(type, value) {
     userSetting[type] = value;
     SaveUserSetting(JSON.stringify(userSetting));
 }
-function toggleModeState() {
-    if (freeTable) {
-        console.log("Toggling Mode");
-        let button = document.getElementById("modeButton");
-        if (button.getAttribute("data-mode") === "release") {
-            button.setAttribute("data-mode", "development");
-            button.textContent = "Dev Mode";
-        } else {
-            button.setAttribute("data-mode", "release");
-            button.textContent = "Release Mode";
-        }
-        try {
-            updateUserSetting("mode", button.getAttribute("data-mode"));
-            reload();
-        } catch (error) {
-            console.error(error);
-        }
-        updateTableName(button.getAttribute("data-mode"));
+function toggleModeState(event) {
+    const button = event.currentTarget;
+    if (button.textContent === "World Mode") {
+        button.textContent = "Add-On Mode";
+        document.querySelectorAll(".isWorld").forEach((element) => {
+            element.style.display = "none";
+        });
+        document.querySelectorAll(".isNotWorld").forEach((element) => {
+            element.style.display = "block"; // Or 'flex', 'grid' etc.
+        });
     } else {
-        setTimeout(toggleModeState, 100);
+        button.textContent = "World Mode";
+        document.querySelectorAll(".isWorld").forEach((element) => {
+            element.style.display = "block";
+        });
+        document.querySelectorAll(".isNotWorld").forEach((element) => {
+            element.style.display = "none";
+        });
     }
 }
-document.getElementById("modeButton").addEventListener("click", (e) => {
-    toggleModeState();
+document.getElementById("modeButton").addEventListener("click", (event) => {
+    toggleModeState(event);
 });
 document.getElementById("saveFormat").addEventListener("change", (select) => {
     updateUserSetting("format", select.target.value);
@@ -291,27 +162,95 @@ document.getElementById("uiselect").addEventListener("change", (select) => {
     applyTheme(themes[value]);
 });
 async function generateHTMLTables(inputArray) {
-    let tableName = ["resourcePack", "addOnPack", "behaviorPack"];
     const tablesHTML = [];
-    for (let i = 0; i < inputArray.length; i++) {
+    for (let i = 0; i <= 3; i++) {
         let array = inputArray[i];
-        let tableHTML = `<h2 id="${tableName[i]}">Error</h2><table><tbody>`;
+        const isWorldClass = i === 3 ? "isWorld" : "isNotWorld";
+        let tableHTML = `
+            <h2 class="${isWorldClass}">
+                ${["Resource Pack", "Add-On Pack", "Behavior Pack", "Worlds", "Warning"][i]}
+            </h2>
+            <table class="${isWorldClass}">
+                <tbody>`;
         if (array) {
             for (let j = 0; j < array.length; j++) {
-                let pack = array[j];
-                let scriptCurrentVersion = "null-script";
-                if (pack.ScriptState) scriptCurrentVersion = pack.ScriptState;
-                let projectImageBase = await GetImage(
-                    pack.Path || pack.ResourcePath,
-                );
+                const pack = array[j];
+                const cleanName = pack.CleanName;
+                const scriptState =
+                    pack?.ScriptState || pack?.BehaviorPack?.ScriptState;
+                let scriptCurrentVersion = scriptState
+                    ? scriptState
+                    : "null-script";
+                switch (i) {
+                    case 1: // Add-On Pack
+                        tableHTML += `
+                            <tr data-current-version="${scriptCurrentVersion}" data-pack-name="${cleanName}" data-pack-type="addOnPack" data-pack-path="${base64EncodeUnicode(JSON.stringify([pack.ResourcePack.Path, pack.BehaviorPack.Path]))}" data-pack-signatures="${pack.IsSignatures}">
+                                <td class="noneData"><img class="projectImage" src="/${base64EncodeUnicode(pack.BehaviorPack.Icon)}.png"></td>
+                                <td id="textCell" class="averageTextCell">${cleanName}
+                                <div class="hiddenAddonAttributes">
+                                    <div>
+                                        <span class="packNote">Behavior Pack:</span><br>
+                                        <span><img class="projectImage" src="/${base64EncodeUnicode(pack.BehaviorPack.Icon)}.png"> ${pack.BehaviorPack.CleanName}</span>
+                                    </div>
+                                    <br>
+                                    <div>
+                                        <span class="packNote">Resource Pack:</span><br>
+                                        <span><img class="projectImage" src="/${base64EncodeUnicode(pack.ResourcePack.Icon)}.png"> ${pack.ResourcePack.CleanName}</span>
+                                    </div>
+                                </div>
+                        `;
+                        break;
+                    case 3: // World
+                        //console.log(pack);
+                        const requiredRP = JSON.parse(
+                            base64Decode(pack.RequiredRP),
+                        );
+                        const requiredBP = JSON.parse(
+                            base64Decode(pack.RequiredBP),
+                        );
+                        console.log("requiredBP: ", requiredBP);
+                        console.log("requiredRP: ", requiredRP);
+                        tableHTML += `
+                            <tr data-pack-name="${cleanName}" data-pack-type="world" data-pack-required-rp="${pack.RequiredRP}" data-pack-required-bp="${pack.RequiredBP}" data-pack-path="${base64EncodeUnicode(JSON.stringify([pack.Path]))}">
+                                <td class="noneData"><img class="worldImage" src="/${base64EncodeUnicode(pack.Icon)}.png"></td>
+                                <td id="textCell" class="averageTextCell">${cleanName}
+                                <div class="hiddenAddonAttributes">
+                                    <div>
+                        `;
+                        if (requiredBP.length > 0) {
+                            tableHTML += `<span class="packNote">Behavior Pack:</span><br>`;
+                            requiredBP.forEach((bp) => {
+                                tableHTML += `
+                                    <span><img class="projectImage" src="/${base64EncodeUnicode(bp.Icon)}.png"> ${bp.CleanName}</span>
+                                `;
+                            });
+                        }
+                        tableHTML += `</div><br><div>`;
+                        if (requiredRP.length > 0) {
+                            tableHTML += `<span class="packNote">Resource Pack:</span><br>`;
+                            requiredRP.forEach((rp) => {
+                                tableHTML += `
+                                    <span><img class="projectImage" src="/${base64EncodeUnicode(rp.Icon)}.png"> ${rp.CleanName}</span>
+                                `;
+                            });
+                        }
+                        tableHTML += `</div></div>`;
+                        break;
+                    default: // Resource Pack & Behavior Pack
+                        const type = i === 0 ? "resourcePack" : "behaviorPack";
+                        tableHTML += `
+                            <tr data-current-version="${scriptCurrentVersion}" data-pack-name="${cleanName}" data-pack-type="${type}" data-pack-path="${base64EncodeUnicode(JSON.stringify([pack.Path]))}" data-pack-signatures="${pack.IsSignatures}">
+                                <td class="noneData"><img class="projectImage" src="/${base64EncodeUnicode(pack.Icon)}.png"></td>
+                                <td id="textCell" class="averageTextCell">${cleanName}
+                        `;
+                }
                 tableHTML += `
-                    <tr data-current-version="${scriptCurrentVersion}" data-pack-name="${pack.CleanName}" data-pack-type="${tableName[i]}" data-pack-path="${pack.Path}" data-pack-rp-path="${pack.ResourcePath}" data-pack-bp-path="${pack.BehaviorPath}" data-pack-signatures="${pack.IsSignatures}">
-                        <td class="noneData"><img class="projectImage" src="${projectImageBase}"></td>
-                        <td id="textCell" class="averageTextCell">${pack.CleanName}</td>
-                        <td id="buttonCell1" class="updateScriptVersionButton"><button class="updateVersion" style="visibility:hidden;">Update API</button></td>
+                        </td>
+                        <td id="buttonCell1"><button class="updateVersion" style="visibility:hidden;">Update API</button></td>
                         <td id="buttonCell2"><button class="compileButton">Compile</button></td>
                         <td id="buttonCell3" class="normalizeButton"><button class="normalizePack" style="visibility:hidden;">Normalize Pack</button></td>
-                    </tr>`;
+                    </tr>
+                `;
             }
         }
         tableHTML += `</tbody></table>`;
@@ -319,181 +258,63 @@ async function generateHTMLTables(inputArray) {
     }
     return tablesHTML.join("");
 }
-function updateCheck() {
-    let smallerStrings = [];
-    fetch("https://registry.npmjs.org/@minecraft/server")
-        .then((response) => {
-            if (!response.ok) {
-                NotifyText(
-                    "Failed to check for Script API version. Please check your internet connection.",
-                );
-                throw new Error("Network response was not ok");
-            }
-            return response.json();
-        })
-        .then((data) => {
-            try {
-                const numString = Math.max(
-                    ...Object.keys(data.time)
-                        .filter((key) => /^\d+\.\d+\.\d+/.test(key))
-                        .filter((item) => item.endsWith("-stable"))
-                        .map((str) => {
-                            const match = str.match(/^(\d+\.\d+\.\d+)/);
-                            return match
-                                ? match[1]
-                                      .split(".")
-                                      .reduce(
-                                          (acc, num, index) =>
-                                              acc +
-                                              num * Math.pow(100, 2 - index),
-                                          0,
-                                      )
-                                : null;
-                        }),
-                ).toString();
-                let i = numString.length;
-                for (; i > 0; i -= 2) {
-                    smallerStrings.unshift(
-                        numString.slice(Math.max(i - 2, 0), i),
-                    );
-                }
-                let latestVersion =
-                    smallerStrings.map((item) => Number(item)).join(".") +
-                    "-beta";
-                document.getElementById("latestScriptVersion").innerText =
-                    latestVersion;
-                document.getElementById(
-                    "latestScriptContainer",
-                ).style.visibility = "visible";
-                [...document.getElementsByClassName("normalizeButton")].forEach(
-                    (button) => {
-                        let boolValue =
-                            button
-                                .closest("tr")
-                                .getAttribute("data-pack-signatures") === "true"
-                                ? true
-                                : false;
-                        if (boolValue) {
-                            console.log(boolValue);
-                            button.querySelector("button").style.visibility =
-                                "visible";
-                        }
-                    },
-                );
-                [
-                    ...document.getElementsByClassName(
-                        "updateScriptVersionButton",
-                    ),
-                ].forEach((button) => {
-                    let currentVersion = button
-                        .closest("tr")
-                        .getAttribute("data-current-version");
-                    if (
-                        currentVersion !== "null-script" &&
-                        currentVersion.endsWith("-beta") &&
-                        currentVersion !== latestVersion
-                    ) {
-                        button.querySelector("button").style.visibility =
-                            "visible";
-                    }
-                });
-            } catch (error) {
-                console.error("Error: " + error);
-            }
-        })
-        .catch((error) => {
-            console.warn(error);
-        });
-}
-function checkUndefined(value) {
-    return value === "undefined" ? undefined : value;
-}
 function reload() {
-    freeTable = false;
-    let isDevMode =
-        document.getElementById("modeButton").getAttribute("data-mode") ===
-        "development";
-    console.log(isDevMode);
-    GetData(isDevMode).then((data) => {
+    GetData().then((data) => {
         const result = JSON.parse(data);
         generateHTMLTables(result).then((tables) => {
-            freeTable = true;
             document.getElementById("table").innerHTML = tables;
-            updateTableName(
-                document.getElementById("modeButton").getAttribute("data-mode"),
-            );
-            updateCheck();
+            document.getElementById("modeButton").textContent = "Add-On Mode";
             document.querySelectorAll("button").forEach((button) => {
                 button.addEventListener("click", () => {
-                    let dataElement = button.closest("tr");
+                    const dataElement = button.closest("tr");
+                    const packIcon = JSON.parse(
+                        base64Decode(
+                            dataElement.getAttribute("data-pack-path"),
+                        ),
+                    )[0];
                     if (button.classList.contains("updateVersion")) {
-                        let latestScriptVersion = document.getElementById(
-                            "latestScriptVersion",
-                        ).textContent;
-                        let behaviorPath =
-                            checkUndefined(
-                                dataElement.getAttribute("data-pack-bp-path"),
-                            ) || dataElement.getAttribute("data-pack-path");
                         UpdateScriptVersion(
-                            behaviorPath,
+                            dataElement.getAttribute("data-pack-path"),
                             dataElement.getAttribute("data-current-version"),
-                        );
+                        ).then((result) => {
+                            Notify(result, packIcon);
+                        });
                         reload();
-                        NotifyText(
-                            `Updating script for ${dataElement.getAttribute("data-pack-name")}`,
-                        );
                     } else if (button.classList.contains("compileButton")) {
-                        let packName =
-                            dataElement.getAttribute("data-pack-name");
-                        let packIcon =
-                            dataElement.getAttribute("data-pack-path") ||
-                            dataElement.getAttribute("data-pack-rp-path");
-                        packIcon += "\\pack_icon.png";
                         let packData = {
                             CleanName:
                                 dataElement.getAttribute("data-pack-name"),
                             PackType:
                                 dataElement.getAttribute("data-pack-type"),
-                            ResoucePackPath:
-                                checkUndefined(
-                                    dataElement.getAttribute(
-                                        "data-pack-rp-path",
-                                    ),
-                                ) || dataElement.getAttribute("data-pack-path"),
-                            BehaviorPackPath:
-                                checkUndefined(
-                                    dataElement.getAttribute(
-                                        "data-pack-bp-path",
-                                    ),
-                                ) || dataElement.getAttribute("data-pack-path"),
+                            PackPath:
+                                dataElement.getAttribute("data-pack-path"),
                             ExportPath: "desktop",
+                            RequiredRP: dataElement.getAttribute(
+                                "data-pack-required-rp",
+                            ),
+                            RequiredBP: dataElement.getAttribute(
+                                "data-pack-required-bp",
+                            ),
                             Format: document.getElementById("saveFormat").value,
                         };
-                        let format =
+                        const format =
                             document.getElementById("saveFormat").value;
+                        const packDataJson = JSON.stringify(packData);
                         if (
                             document.getElementById("saveMode").value ===
                             "choose"
                         ) {
-                            OpenDirectoryDialog()
+                            OpenDirectoryDialogCall()
                                 .then((path) => {
                                     packData.ExportPath = path;
-                                    CompilePack(JSON.stringify(packData)).then(
-                                        () => {
-                                            Notify(
-                                                `Finished compiling: \n ${packName}.${format}`,
-                                                packIcon,
-                                            );
-                                        },
-                                    );
+                                    CompilePack(packDataJson).then((result) => {
+                                        Notify(result, packIcon);
+                                    });
                                 })
                                 .catch();
                         } else {
-                            CompilePack(JSON.stringify(packData)).then(() => {
-                                Notify(
-                                    `Finished compiling: \n ${packName}.${format}`,
-                                    packIcon,
-                                );
+                            CompilePack(packDataJson).then((result) => {
+                                Notify(result, packIcon);
                             });
                         }
                     } else if (button.classList.contains("normalizePack")) {
@@ -531,6 +352,21 @@ function reload() {
                     }
                 });
             });
+            document.querySelectorAll(".updateVersion").forEach((button) => {
+                // button is inside a td, which is inside a tr
+                let dataElement = button.closest("tr");
+                let currentVersion = dataElement.getAttribute(
+                    "data-current-version",
+                );
+                if (currentVersion?.endsWith("-beta")) {
+                    button.style.visibility = "visible";
+                    button.setAttribute(
+                        "data-pack-path",
+                        dataElement.getAttribute("data-pack-path"),
+                    );
+                    button.setAttribute("data-current-version", currentVersion);
+                }
+            });
             document.getElementById("expand").addEventListener("click", () => {
                 BrowserOpenURL("https://blockstate.team");
             });
@@ -538,7 +374,39 @@ function reload() {
     });
 }
 reload();
-window.addEventListener("online", () => {
-    console.log("Back Online!");
-    WindowReload();
+document.getElementById("reload").addEventListener("click", () => {
+    reload();
+});
+function base64EncodeUnicode(str) {
+    const utf8String = encodeURIComponent(str).replace(
+        /%([0-9A-F]{2})/g,
+        function (match, p1) {
+            return String.fromCharCode("0x" + p1);
+        },
+    );
+    return btoa(utf8String);
+}
+function base64Decode(base64String) {
+    const binaryString = atob(base64String);
+    return decodeURIComponent(
+        binaryString
+            .split("")
+            .map(function (c) {
+                return "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2);
+            })
+            .join(""),
+    );
+}
+document.getElementById("uninstall").addEventListener("click", () => {
+    document.getElementById("uninstallPanel").style.visibility = "visible";
+});
+document.getElementById("confirmUninstall").addEventListener("click", () => {
+    UninstallApp().then((result) => {
+        if (result != "") {
+            NotifyText(result);
+        }
+    });
+});
+document.getElementById("cancelUninstall").addEventListener("click", () => {
+    document.getElementById("uninstallPanel").style.visibility = "hidden";
 });
